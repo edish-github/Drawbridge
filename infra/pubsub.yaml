@@ -1,0 +1,95 @@
+# The event backbone as data.
+#
+# This file, the constants in shared/events.py and the topic loop in infra/bootstrap.sh are
+# three views of one list and CI diffs them. An undocumented topic is one bootstrap does not
+# create, and an untested one.
+#
+# Delivery is at-least-once with no ordering guarantee. Duplicates are handled by the
+# idempotency key on the envelope; sequence is handled by the state guard every consumer
+# opens with. A message reaching its dead-letter topic moves its review to NEEDS_HUMAN and
+# surfaces on the dashboard — visible failure handling is a graded behaviour.
+
+defaults:
+  ack_deadline_seconds: 60
+  max_delivery_attempts: 5
+  dlq_suffix: .dlq
+
+topics:
+  - name: review.intake
+    published_by: [portal, dashboard]
+    consumed_by: [orchestrator]
+    payload: vendor details, tier hints
+
+  - name: review.plan_ready
+    published_by: [orchestrator]
+    consumed_by: [questionnaire]
+    payload: review_id, question tier
+
+  - name: vendor.reply_received
+    published_by: [vendor_inbox]
+    consumed_by: [questionnaire]
+    payload: message ref
+
+  - name: vendor.evidence_uploaded
+    published_by: [portal]
+    consumed_by: [screening]
+    payload: object ref in the quarantine bucket
+
+  - name: evidence.screened
+    published_by: [screening]
+    consumed_by: [evidence]
+    payload: clean object ref, per-filter verdict
+
+  - name: review.findings_ready
+    published_by: [evidence]
+    consumed_by: [risk_scorer]
+    payload: review_id
+
+  - name: review.score_ready
+    published_by: [risk_scorer]
+    consumed_by: [orchestrator]
+    payload: score, band, memo ref
+
+  - name: review.approved
+    published_by: [approvals]
+    consumed_by: [orchestrator, watchdog]
+    payload: decision, named identity
+
+  - name: review.rescore
+    published_by: [screening, risk_scorer]
+    consumed_by: [risk_scorer]
+    payload: review_id, reason (for example adversarial_conduct)
+
+  - name: watchdog.sweep
+    published_by: [cloud_scheduler]
+    consumed_by: [watchdog]
+    payload: sweep window, portfolio slice
+
+  - name: watchdog.hit
+    published_by: [watchdog]
+    consumed_by: [orchestrator]
+    payload: signal, vendor_id, confidence
+
+# What a consumer does with an event that arrives out of phase. Pub/Sub guarantees delivery,
+# not sequence, so each of these is defined rather than incidental.
+out_of_phase:
+  - event: vendor.reply_received
+    condition: review already SCORED
+    behaviour: >-
+      attach to the ledger as an addendum; if it changes an answer that produced a finding,
+      publish review.rescore. Never silently discarded — the discarded reply is the one the
+      vendor will quote back.
+
+  - event: evidence.screened
+    condition: no plan exists yet
+    behaviour: park the message and retry with backoff; dead-letter after five attempts
+
+  - event: watchdog.hit
+    condition: review already reopened
+    behaviour: deduplicate on signal id
+
+  - event: any
+    condition: review is DECIDED
+    behaviour: >-
+      append to the ledger, never mutate. A decided review is immutable; a new signal opens a
+      new linked review rather than editing a closed one.

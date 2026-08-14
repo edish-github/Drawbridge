@@ -1,0 +1,53 @@
+# Budget and cost posture.
+#
+# The alert thresholds are applied by hand in the billing console, because the billing API is
+# outside this project's scope and linking billing is a manual step by design. This file is
+# the record of what was set, so the README and the console agree.
+#
+# The per-review ceiling is different in kind: it is enforced in code, not observed. Exceeding
+# it parks the review in NEEDS_HUMAN with a cost card, and retries and model calls stop. A
+# budget that is observed rather than enforced is not a control.
+
+credits_usd: 150
+
+alerts:
+  - threshold_usd: 50
+    percent_of_credits: 33
+    channel: email
+  - threshold_usd: 100
+    percent_of_credits: 67
+    channel: email
+  - threshold_usd: 130
+    percent_of_credits: 87
+    channel: email
+
+per_review_ceiling:
+  usd: 0.50
+  enforcement: park            # the review moves to NEEDS_HUMAN; it is never merely logged
+  config_key: COST_CEILING_PER_REVIEW_USD
+
+cloud_run:
+  min_instances: 0             # everywhere, including the public entry page
+  max_instances: 2
+  cpu_throttling: true
+
+public_routes:
+  model_calls: none            # no route reachable without a token may reach the model router
+  rate_limit: per_ip
+  entry_page: statically_rendered
+
+agent_engine:
+  min_instances: 0
+  max_instances: 1
+  teardown: after each phase for anything not in the demo
+
+storage:
+  quarantine_lifecycle_days: 7
+
+model_routing:
+  default: MODEL_FAST
+  deep_model_tasks: [cross_examine, risk_memo]
+  scoring_model_calls: 0       # scoring is arithmetic; there is no routing entry for it
+
+demo_runs:
+  full_end_to_end_cap: 20      # before recording week; UI work uses cached fixtures
