@@ -1,0 +1,174 @@
+# Curated question bank, organised by rubric domain.
+#
+# The model selects and tailors from this bank; it never invents a question. That makes the
+# demo reproducible and the questions defensible, and it is the boundary that keeps bounded
+# self-improvement safe: phrasing may be preferred, never invented, and never scored.
+#
+# Style rule, enforced at load time: no question may be answerable yes or no. Every question
+# demands specific evidence, because specificity is what makes contradiction detection
+# possible later. "Do you encrypt data?" is rejected; "List the encryption standards used
+# for data at rest and in transit and attach your key-management policy" is the shape.
+#
+# Tier 1 selects roughly 60 questions, Tier 2 roughly 30, Tier 3 roughly 12. The ai_specific
+# domain is added when the vendor is an AI service.
+
+version: 1
+
+domains:
+  data_protection:
+    - id: DP01
+      tiers: [1, 2, 3]
+      text: >-
+        List the encryption standards and key lengths used for customer data at rest and in
+        transit, and attach your key-management policy.
+      evidence_required: [key_management_policy]
+    - id: DP02
+      tiers: [1, 2]
+      text: >-
+        State your data retention periods by data category, and describe the deletion process
+        applied at the end of each period, including deletion from backups.
+      evidence_required: [retention_schedule]
+    - id: DP03
+      tiers: [1]
+      text: >-
+        Identify every geographic region in which customer data is stored or processed, and
+        name the legal entity responsible in each.
+      evidence_required: [data_residency_statement]
+    - id: DP04
+      tiers: [1]
+      text: >-
+        Describe how customer data is segregated between tenants, and attach the design or
+        architecture document that describes the mechanism.
+      evidence_required: [architecture_document]
+
+  access_control:
+    - id: AC01
+      tiers: [1, 2, 3]
+      text: >-
+        Describe the multi-factor authentication requirement across your environments,
+        naming any systems, accounts or access paths that are exempt from it.
+      evidence_required: [access_control_policy]
+    - id: AC02
+      tiers: [1, 2]
+      text: >-
+        Describe your privileged access management process, including how administrative
+        credentials are issued, rotated and revoked, and attach the most recent access review.
+      evidence_required: [access_review]
+    - id: AC03
+      tiers: [1]
+      text: >-
+        State the maximum elapsed time between an employee departure and revocation of their
+        access, and attach evidence from your last three departures.
+      evidence_required: [offboarding_records]
+    - id: AC04
+      tiers: [1, 2]
+      text: >-
+        Describe how your staff access customer data in production, including approval,
+        logging and time limits on that access.
+      evidence_required: [production_access_procedure]
+
+  incident_response:
+    - id: IR01
+      tiers: [1, 2, 3]
+      text: >-
+        State your contractual breach notification window in hours, and describe the internal
+        process that meets it, naming the roles responsible.
+      evidence_required: [incident_response_plan]
+    - id: IR02
+      tiers: [1, 2]
+      text: >-
+        List every security incident affecting customer data in the last 24 months, with the
+        date of detection, the date of customer disclosure, and the elapsed time between them.
+      evidence_required: [incident_history]
+    - id: IR03
+      tiers: [1]
+      text: >-
+        Describe your most recent incident response exercise, including the date, the
+        scenario, the participants and the remediation actions it produced.
+      evidence_required: [tabletop_exercise_report]
+
+  compliance_posture:
+    - id: CP01
+      tiers: [1, 2, 3]
+      text: >-
+        Attach your most recent SOC 2 Type II report or equivalent, and state the report
+        period, the auditor and the opinion issued.
+      evidence_required: [soc2_report]
+    - id: CP02
+      tiers: [1, 2]
+      text: >-
+        State which of your services and environments fall inside the scope of that report,
+        and identify any that fall outside it.
+      evidence_required: [scope_statement]
+    - id: CP03
+      tiers: [1, 2]
+      text: >-
+        List every exception, qualification or deviation recorded in your most recent audit
+        report, with its remediation status and target date.
+      evidence_required: [exception_register]
+    - id: CP04
+      tiers: [1, 2, 3]
+      text: >-
+        List your current certifications with their issuing body, certificate number and
+        expiry date, and attach each certificate.
+      evidence_required: [certificates]
+
+  subprocessors:
+    - id: SP01
+      tiers: [1, 2]
+      text: >-
+        Attach your current subprocessor list, naming for each one its purpose, the categories
+        of customer data it processes, and its processing location.
+      evidence_required: [subprocessor_list]
+    - id: SP02
+      tiers: [1]
+      text: >-
+        Describe the security assessment you perform on a subprocessor before onboarding, and
+        attach the most recent completed assessment.
+      evidence_required: [subprocessor_assessment]
+    - id: SP03
+      tiers: [1]
+      text: >-
+        State the notice period you give customers before adding or replacing a subprocessor,
+        and describe the objection mechanism available to them.
+      evidence_required: [dpa_extract]
+
+  business_continuity:
+    - id: BC01
+      tiers: [1, 2]
+      text: >-
+        State your recovery time objective and recovery point objective for the service being
+        purchased, and attach the test results that demonstrate them.
+      evidence_required: [bcdr_test_results]
+    - id: BC02
+      tiers: [1]
+      text: >-
+        Describe the date, scope and outcome of your most recent disaster recovery test,
+        including any objectives that were not met.
+      evidence_required: [dr_test_report]
+
+  ai_specific:
+    - id: AI01
+      tiers: [1]
+      text: >-
+        State whether customer content is used to train, fine-tune or evaluate any model, and
+        attach the contractual term or policy that governs this.
+      evidence_required: [ai_data_use_policy]
+    - id: AI02
+      tiers: [1]
+      text: >-
+        Name every model provider in your processing chain, state what customer content each
+        one receives, and attach the data-processing terms you hold with them.
+      evidence_required: [model_provider_terms]
+    - id: AI03
+      tiers: [1]
+      text: >-
+        Describe the controls applied to model outputs before they reach a customer, including
+        any filtering, review or logging.
+      evidence_required: [output_control_description]
+    - id: AI04
+      tiers: [1]
+      text: >-
+        State your retention period for prompts and generated outputs, and describe who inside
+        your organisation can read them.
+      evidence_required: [prompt_retention_policy]
