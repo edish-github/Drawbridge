@@ -1,0 +1,64 @@
+# Model Armor template applied to everything a vendor sends: uploads and reply bodies.
+#
+# Both vectors run through one screening path, so an injection arriving in an email body is
+# recorded, produces findings and can raise Adversarial Conduct exactly as one arriving in a
+# PDF. The email body is the likelier vector in reality, and a defence that scores one and
+# only blocks the other has a seam in it.
+#
+# create_templates.sh renders these settings into gcloud flags. The template is never created
+# by hand in the console: a template that exists only in a console is not reproducible, and
+# the id and version go into the clean-stamp and the audit binder so a reviewer six months
+# later knows which policy screened a document.
+
+id: drawbridge-untrusted
+location_from_env: REGION
+
+applied_to:
+  - vendor evidence uploads
+  - vendor reply bodies
+  - injection corpus fixtures
+
+filters:
+  prompt_injection_and_jailbreak:
+    enforcement: enabled
+    confidence_level: high      # low chance of false positives, per Google's own guidance
+    on_match: >-
+      Adversarial Conduct. The Trust Score falls 25 points, the band is forced to escalate,
+      the vendor record carries the flag into every future review, and the matched excerpt is
+      stored as inert evidence that is never re-entered into a prompt.
+
+  malicious_uri:
+    enforcement: enabled
+    on_match: >-
+      A subprocessors finding at medium severity, source=rule, with the URI stored inert. A
+      flagged domain inside a vendor's own security policy is a real finding.
+
+  sensitive_data_protection:
+    enforcement: enabled        # basic config; no de-identify template
+    on_match: >-
+      A data_protection finding at medium severity, source=rule. A vendor who ships customer
+      personal data inside an evidence pack has told you something material about their
+      handling practice, and this is the most common finding in real vendor review.
+
+  responsible_ai:
+    enforcement: enabled
+    confidence_level: medium_and_above
+    blocking: false
+    on_match: >-
+      Logged, never blocking, never scored. Matches in a vendor security document are
+      near-zero signal, and a false positive that stalls a review is worse than an unlogged
+      profanity.
+
+# A verdict is trusted only when every critical filter reports EXECUTION_SUCCESS. A detector
+# that never ran is not a detector that found nothing: no clean-stamp is issued, the object
+# stays in quarantine, and the review parks in NEEDS_HUMAN.
+critical_filters:
+  - prompt_injection_and_jailbreak
+  - malicious_uri
+  - sensitive_data_protection
+
+metadata:
+  log_sanitize_operations: true
+  # Partial detector failures must surface rather than being tolerated, or the fail-closed
+  # rule above becomes unreachable.
+  ignore_partial_invocation_failures: false

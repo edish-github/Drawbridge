@@ -1,0 +1,53 @@
+# Model Armor template applied to what the fleet itself produces.
+#
+# The risk memo, findings, and outbound email bodies. This is the only control in the system
+# that assumes every earlier one failed: if an injected instruction ever survived into a memo —
+# steering a recommendation, embedding a URL, echoing dossier content back out — it is caught
+# here, at the last gate before a CISO acts on it.
+#
+# Outbound email matters for a second reason. The message is assembled from internal state, so
+# nothing otherwise checks that it does not carry internal notes, another vendor's details or
+# dossier content. Running it through this template with Sensitive Data Protection enabled
+# closes the one path where the fleet legitimately speaks to the outside world.
+
+id: drawbridge-output
+location_from_env: REGION
+
+applied_to:
+  - agent-produced risk memos
+  - findings rendered for a human
+  - outbound email bodies
+
+filters:
+  prompt_injection_and_jailbreak:
+    enforcement: enabled
+    confidence_level: high
+    on_match: >-
+      The artefact is never published. The review parks in NEEDS_HUMAN with reason
+      output_screening.
+
+  malicious_uri:
+    enforcement: enabled
+    on_match: The artefact is never published; the review parks with reason output_screening.
+
+  sensitive_data_protection:
+    enforcement: enabled
+    on_match: >-
+      The artefact is never published. Enabled here specifically to catch dossier leakage: an
+      outbound message carrying another vendor's details or internal notes is caught before it
+      leaves the project.
+
+  responsible_ai:
+    enforcement: enabled
+    confidence_level: medium_and_above
+    blocking: true              # unlike the untrusted template: this is our own output
+    on_match: The artefact is never published; the review parks with reason output_screening.
+
+critical_filters:
+  - prompt_injection_and_jailbreak
+  - malicious_uri
+  - sensitive_data_protection
+
+metadata:
+  log_sanitize_operations: true
+  ignore_partial_invocation_failures: false
