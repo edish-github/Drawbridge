@@ -1,0 +1,1 @@
+In-VPC PII scrubber: a small local model that removes personal data from screened text before it reaches a generative model, guided by the Sensitive Data Protection hits screening produced. Optional control — it degrades rather than failing closed. Runs as `sa-armor`.

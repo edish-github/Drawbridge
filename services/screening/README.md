@@ -1,0 +1,1 @@
+Screening pipeline: quarantine read, Model Armor screen, clean-bucket promotion with the signed verdict stamp. Runs as `sa-armor`, the only identity with any role on the quarantine bucket and no capability to call a generative model.
