@@ -1,0 +1,92 @@
+# Trust Score rubric. Config, never prompt.
+#
+# The score is 0-100 and higher is safer. Prose may say a vendor has raised your risk;
+# the number always falls. Every domain starts at its maximum and loses points per finding
+# by severity and contradiction flag; the arithmetic is computed in Python and printed in
+# the audit binder so a human can re-do it by hand.
+#
+# The weights sum to exactly 100, so a band read as a percentage is arithmetically true.
+# scoring.load_rubric raises if this stops being the case.
+
+version: 1
+scale_max: 100
+
+domains:
+  data_protection: 20        # encryption at rest and in transit, key management, retention
+  access_control: 15         # identity, MFA, privileged access, joiner-mover-leaver
+  incident_response: 15      # detection, disclosure timelines, breach history
+  compliance_posture: 15     # certifications, audit reports, scope, auditor opinion
+  subprocessors: 15          # the fourth-party chain; the domain the extraction pass feeds
+  business_continuity: 10    # RTO and RPO, tested recovery
+  ai_specific: 10            # training-data use, model provider chain, output controls
+
+penalties:
+  low: 2
+  medium: 5
+  high: 10
+
+# A contradiction is a claim the vendor's own evidence refutes, which is materially worse
+# than the same gap found with no claim attached.
+contradiction_multiplier: 1.5
+
+modifiers:
+  # Attempted manipulation of the review process. Applied after the domain arithmetic and
+  # regardless of it, with the band forced to escalate.
+  adversarial_conduct:
+    penalty: 25
+    forces_band: escalate
+
+bands:
+  approve: 80        # >= 80
+  conditional: 60    # 60-79
+  escalate: 0        # < 60
+
+# The domain a finding lands in, by where it came from. Every finding also carries a
+# provenance label of rule or model, which the binder prints beside it.
+finding_map:
+  armor_prompt_injection:
+    domain: conduct
+    severity: high
+    provenance: rule
+    raises_modifier: adversarial_conduct
+  armor_sensitive_data:
+    domain: data_protection
+    severity: medium
+    provenance: rule
+  armor_malicious_uri:
+    domain: subprocessors
+    severity: medium
+    provenance: rule
+  armor_responsible_ai:
+    domain: null           # logged, never scored
+    provenance: rule
+  cert_expired:
+    domain: compliance_posture
+    severity: high
+    provenance: rule
+  report_period_stale:
+    domain: compliance_posture
+    severity: medium
+    provenance: rule
+  scope_excludes_service:
+    domain: compliance_posture
+    severity: high
+    provenance: rule
+  no_auditor_or_opinion:
+    domain: compliance_posture
+    severity: medium
+    provenance: rule
+  unknown_fourth_party:
+    domain: subprocessors
+    severity: medium
+    provenance: rule
+  cross_examination:
+    domain: per_finding    # assigned by the Evidence agent at finding-creation time
+    severity: per_finding
+    provenance: model
+
+# Tier 2 and Tier 3 reviews use reduced domain sets renormalised to 100.
+tier_profiles:
+  1: [data_protection, access_control, incident_response, compliance_posture, subprocessors, business_continuity, ai_specific]
+  2: [data_protection, access_control, incident_response, compliance_posture, subprocessors, business_continuity]
+  3: [data_protection, access_control, compliance_posture]
