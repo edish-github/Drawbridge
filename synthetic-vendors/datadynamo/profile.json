@@ -1,0 +1,29 @@
+{
+  "vendor_id": "datadynamo",
+  "name": "DataDynamo Logistics",
+  "legal_entity_name": "DataDynamo Logistics GmbH",
+  "primary_domain": "datadynamo-logistics.example",
+  "category": "Freight routing and delivery orchestration",
+  "is_ai_vendor": false,
+  "tier": 2,
+  "tier_at_intake": 2,
+  "tier_expected_final": 1,
+  "status": "active",
+  "adversarial_flag": false,
+  "role_in_pack": "contradictor",
+  "intake": {
+    "submitted_by": "Marcus Adeyemi, Procurement",
+    "description": "Internal analytics only. Routing optimisation over our own shipment volumes.",
+    "declared_data_categories": ["internal_operational"],
+    "declared_system_access": "none",
+    "annual_spend_usd": 96000,
+    "service_being_bought": "DataDynamo Routing Platform, enterprise tier"
+  },
+  "contact": {
+    "name": "Tobias Renn",
+    "role": "Compliance Manager",
+    "email": "compliance@datadynamo-logistics.example",
+    "persona": "Cooperative and quick to reply, but answers in confident generalities and attaches documents without reading them closely. Not adversarial — the contradictions are between what he believes to be true and what his own auditor wrote down."
+  },
+  "notes": "Intake declares internal analytics only. The answer to Q23 names customer records processed in an EU environment, which re-tiers the review upward from 2 to 1 mid-flight and adds the additional domain's questions."
+}

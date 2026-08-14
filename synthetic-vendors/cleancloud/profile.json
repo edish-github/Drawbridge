@@ -1,0 +1,27 @@
+{
+  "vendor_id": "cleancloud",
+  "name": "CleanCloud Analytics",
+  "legal_entity_name": "CleanCloud Analytics Ltd",
+  "primary_domain": "cleancloud-analytics.example",
+  "category": "Business intelligence and reporting",
+  "is_ai_vendor": false,
+  "tier": 2,
+  "status": "active",
+  "adversarial_flag": false,
+  "role_in_pack": "control",
+  "intake": {
+    "submitted_by": "Marcus Adeyemi, Procurement",
+    "description": "Internal analytics dashboards over non-customer operational data.",
+    "declared_data_categories": ["internal_operational"],
+    "declared_system_access": "none",
+    "annual_spend_usd": 18000,
+    "service_being_bought": "CleanCloud Reporting, standard tier"
+  },
+  "contact": {
+    "name": "Ines Vardanyan",
+    "role": "Head of Information Security",
+    "email": "security@cleancloud-analytics.example",
+    "persona": "Prompt and precise. Answers in full, attaches what is asked for, and says plainly when something is out of scope rather than padding the answer."
+  },
+  "notes": "The calibration vendor. Everything this vendor says is supported by its own evidence, so a finding raised against CleanCloud is a false positive and the tests treat it as one."
+}

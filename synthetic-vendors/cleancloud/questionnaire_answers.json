@@ -1,0 +1,71 @@
+{
+  "vendor_id": "cleancloud",
+  "tier": 2,
+  "reply_schedule": [
+    { "simulated_day": 2, "question_ids": ["DP01", "DP02", "AC01", "AC02"] },
+    { "simulated_day": 5, "question_ids": ["IR01", "IR02", "CP01", "CP02"] },
+    { "simulated_day": 8, "question_ids": ["CP03", "CP04", "SP01", "BC01"] }
+  ],
+  "answers": {
+    "DP01": {
+      "text": "Customer and operational data is encrypted at rest with AES-256 using Cloud KMS-managed keys, and in transit with TLS 1.3. Our key-management policy is attached as key-management-policy.md; keys rotate every 90 days and rotation is logged.",
+      "attachments": ["key-management-policy.md"],
+      "expected_confidence": 0.94
+    },
+    "DP02": {
+      "text": "Operational records are retained for 24 months and report exports for 12 months. Deletion runs nightly against both primary storage and backups; backups reach full expiry 35 days after the primary deletion, which is stated in our retention schedule.",
+      "attachments": ["key-management-policy.md"],
+      "expected_confidence": 0.9
+    },
+    "AC01": {
+      "text": "Multi-factor authentication is required for all staff on all systems, including administrative access to production. There are no exemptions. Two break-glass accounts exist; both require hardware tokens held by two named directors and every use raises an alert.",
+      "attachments": ["access-control-policy.md"],
+      "expected_confidence": 0.95
+    },
+    "AC02": {
+      "text": "Privileged access is granted through a request-and-approval workflow with a named approver, is time-bound to 8 hours, and is reviewed quarterly. The most recent quarterly review is summarised in section 4 of our SOC 2 report.",
+      "attachments": ["access-control-policy.md"],
+      "expected_confidence": 0.91
+    },
+    "IR01": {
+      "text": "Our contractual notification window is 72 hours from confirmed detection. The incident response plan names the on-call security lead as the decision maker and the Head of Information Security as the notifier.",
+      "attachments": [],
+      "expected_confidence": 0.92
+    },
+    "IR02": {
+      "text": "We have had no security incidents affecting customer data in the last 24 months. One availability incident occurred on 4 February 2025 lasting 41 minutes, with no data exposure; it is recorded in section 6 of our SOC 2 report.",
+      "attachments": [],
+      "expected_confidence": 0.93
+    },
+    "CP01": {
+      "text": "Our SOC 2 Type II report for the period 1 January to 31 December 2025 is attached. The auditor is Harlow & Finch LLP and the opinion is unqualified.",
+      "attachments": ["soc2-report.md"],
+      "expected_confidence": 0.96
+    },
+    "CP02": {
+      "text": "The report covers CleanCloud Reporting and the underlying data platform, including the standard tier being purchased. Our internal staging environment is out of scope and holds no customer data.",
+      "attachments": ["soc2-report.md"],
+      "expected_confidence": 0.93
+    },
+    "CP03": {
+      "text": "The report records no exceptions. Two observations were raised and both were remediated inside the reporting period; they are listed in section 5.",
+      "attachments": ["soc2-report.md"],
+      "expected_confidence": 0.92
+    },
+    "CP04": {
+      "text": "ISO/IEC 27001:2022, certificate number ISO-27001-CC-4471, issued by Meridian Certification Services, valid to 30 September 2027. The certificate is attached.",
+      "attachments": ["iso-27001-certificate.md"],
+      "expected_confidence": 0.95
+    },
+    "SP01": {
+      "text": "Our subprocessor list is attached. We use three subprocessors: a cloud infrastructure provider, a transactional email provider and a support ticketing provider. None of them process customer content; the email and ticketing providers process contact names and email addresses only.",
+      "attachments": ["subprocessor-list.md"],
+      "expected_confidence": 0.9
+    },
+    "BC01": {
+      "text": "RTO is 4 hours and RPO is 15 minutes for the reporting service. Our most recent disaster recovery test was on 11 November 2025 and met both objectives; results are in section 7 of the SOC 2 report.",
+      "attachments": ["soc2-report.md"],
+      "expected_confidence": 0.91
+    }
+  }
+}

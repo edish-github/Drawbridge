@@ -1,0 +1,94 @@
+{
+  "vendor_id": "datadynamo",
+  "role": "contradictor",
+  "purpose": "The cross-examination showcase. Every contradiction here is between what the vendor claims and what the vendor's own evidence records, which is what makes the finding defensible rather than inferred.",
+  "final_state": "gated",
+  "gate_scope": "decision",
+  "tier": {
+    "at_intake": 2,
+    "final": 1,
+    "retier_expected": true,
+    "trigger_question": "DP03",
+    "plan_version_final": 2,
+    "tier_history_reason_must_name_source": true,
+    "must_not_resend_carried_steps": true
+  },
+  "score": {
+    "band": "conditional",
+    "min": 60,
+    "max": 79
+  },
+  "flags": {
+    "adversarial_conduct": false
+  },
+  "screening": {
+    "documents_screened": 4,
+    "prompt_injection_matches": 0,
+    "all_critical_filters_executed": true
+  },
+  "required_findings": [
+    {
+      "id": "hero_mfa_contradiction",
+      "domain": "access_control",
+      "severity": "high",
+      "contradiction": true,
+      "source": "model",
+      "claim_ref": "AC01",
+      "evidence_ref_must_resolve": true,
+      "evidence_chunk_must_contain": ["exception", "mfa"],
+      "note": "The questionnaire claims organisation-wide MFA. Exception note 3.2 of the audit report records that MFA is not enforced for administrative access and was unremediated at period end."
+    },
+    {
+      "id": "cert_expired",
+      "domain": "compliance_posture",
+      "severity": "high",
+      "contradiction": false,
+      "source": "rule",
+      "note": "ISO certificate ISO-27001-DD-2298 expired 14 March 2025. A date comparison, so this is a guaranteed finding rather than a hoped-for one."
+    },
+    {
+      "id": "breach_disclosure_contradiction",
+      "domain": "incident_response",
+      "severity": "high",
+      "contradiction": true,
+      "source": "model",
+      "claim_ref": "IR01",
+      "note": "The questionnaire claims a 24-hour notification window. The incident sheet records 9 days from detection to disclosure."
+    },
+    {
+      "id": "report_period_stale",
+      "domain": "compliance_posture",
+      "severity": "medium",
+      "contradiction": false,
+      "source": "rule",
+      "note": "The report period ended 30 June 2025, more than 12 months before the review date."
+    },
+    {
+      "id": "no_dr_test_in_period",
+      "domain": "business_continuity",
+      "severity": "medium",
+      "contradiction": false,
+      "source": "model"
+    }
+  ],
+  "followups": {
+    "expected_count": 1,
+    "on_question": "DP01",
+    "reason": "The encryption answer is a non-answer below the confidence threshold, so one targeted follow-up quotes it back and names the evidence required.",
+    "must_not_exceed_cap": 2
+  },
+  "subprocessors": {
+    "extracted_count": 4,
+    "processing_customer_data": 3
+  },
+  "assertions": [
+    "The MFA contradiction is present with domain=access_control, severity=high, contradiction=true and source=model.",
+    "That finding's evidence_ref resolves to a real chunk whose text contains both 'exception' and 'mfa'.",
+    "The expired certificate finding carries source=rule, not source=model.",
+    "The review re-tiers from 2 to 1, plan_version becomes 2, and a TierChange records the answer that caused it.",
+    "Questions carried over from plan v1 are not re-sent: the vendor receives the original set plus the new domain's set, and nothing twice.",
+    "Exactly one targeted follow-up is sent for DP01, and never more than the cap.",
+    "The band is conditional.",
+    "No Adversarial Conduct flag is raised."
+  ]
+}

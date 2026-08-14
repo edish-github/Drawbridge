@@ -1,0 +1,47 @@
+{
+  "vendor_id": "cleancloud",
+  "role": "control",
+  "purpose": "Calibrates the scoring path and proves the happy path. A finding raised against CleanCloud is a false positive, and the tests treat it as one.",
+  "final_state": "gated",
+  "gate_scope": "decision",
+  "tier": {
+    "at_intake": 2,
+    "final": 2,
+    "retier_expected": false
+  },
+  "score": {
+    "min": 80,
+    "band": "approve"
+  },
+  "flags": {
+    "adversarial_conduct": false
+  },
+  "screening": {
+    "documents_screened": 5,
+    "prompt_injection_matches": 0,
+    "sensitive_data_matches": 0,
+    "malicious_uri_matches": 0,
+    "all_critical_filters_executed": true
+  },
+  "findings": {
+    "max_total": 1,
+    "forbidden_domains": ["conduct"],
+    "forbidden_severities": ["high"],
+    "must_not_contain_contradiction": true
+  },
+  "subprocessors": {
+    "extracted_count": 3,
+    "unknown_processing_customer_data": 0
+  },
+  "assertions": [
+    "Trust Score is at least 80 and the band is approve.",
+    "No Adversarial Conduct flag is raised on the review or the vendor record.",
+    "No finding carries contradiction=true.",
+    "Every critical Model Armor filter reports EXECUTION_SUCCESS, so a clean-stamp is issued for every document.",
+    "The ISO certificate expiry is in the future, so the deterministic expiry check produces no finding.",
+    "The SOC 2 report period ends inside the last 12 months, so the staleness check produces no finding.",
+    "The report scope covers the service being bought, so the scope check produces no finding.",
+    "A named auditor and an opinion are both present, so that check produces no finding.",
+    "The review reaches GATED with gate_scope=decision and cannot reach DECIDED without a signed approval token."
+  ]
+}
