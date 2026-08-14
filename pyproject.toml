@@ -1,0 +1,53 @@
+[project]
+name = "drawbridge"
+version = "0.0.0"
+description = "A governed fleet of agents that runs enterprise vendor security reviews"
+requires-python = ">=3.11,<3.13"
+license = { text = "MIT" }
+
+dependencies = [
+    "google-adk==2.7.0",
+    "google-cloud-aiplatform==1.164.0",
+    "google-cloud-firestore==2.28.1",
+    "google-cloud-pubsub==2.39.1",
+    "google-cloud-storage==3.13.1",
+    "google-cloud-trace==1.20.0",
+    "google-cloud-modelarmor==0.7.1",
+    "google-genai==2.18.1",
+    "opentelemetry-sdk==1.43.0",
+    "opentelemetry-exporter-gcp-trace==1.14.0",
+    "pydantic==2.13.4",
+    "python-dotenv==1.2.2",
+    "PyYAML==6.0.3",
+    "fastapi==0.141.1",
+    "uvicorn==0.52.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.14.4",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["shared", "agents", "scenarios", "scripts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test bodies are written against helpers that do not exist yet. The assertions are the
+# specification: they document intent now and fail loudly the moment they are unskipped.
+"tests/*" = ["F821"]
