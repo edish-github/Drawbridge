@@ -5,3 +5,21 @@ dist/
 .DS_Store
 
 research/
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.next/
+out/
+*.tfstate
+*.tfstate.backup
+infra/CAPABILITY-REPORT.md
