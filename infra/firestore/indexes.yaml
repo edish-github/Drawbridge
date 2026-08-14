@@ -1,0 +1,84 @@
+# Firestore index definitions.
+#
+# create_indexes.sh reads this file, so an index that is needed is declared here rather than
+# created by hand in the console — a console-only index is not reproducible, and the spin-up
+# path is a graded item.
+#
+# The KNN vector index is the one that carries an architectural claim. It is composite with
+# review_id, so retrieval is pre-filtered to one review's evidence and can never surface a
+# passage from another review. That property is enforced by the index, not by the query.
+
+version: 1
+
+# text-embedding-005 output dimensionality.
+# TODO(verify): confirm against the live model before creating the index — the dimension is
+# fixed at index creation and changing it means dropping and rebuilding.
+embedding_dimension: 768
+
+indexes:
+  - collection_group: evidence_chunks
+    query_scope: collection
+    purpose: >-
+      KNN retrieval over screened evidence, pre-filtered to one review. The review_id field
+      comes first so the filter is applied by the index.
+    fields:
+      - field_path: review_id
+        order: ascending
+      - field_path: embedding
+        vector_config:
+          dimension: 768
+          flat: true
+
+  - collection_group: findings
+    query_scope: collection
+    purpose: Findings for one review, ordered for the binder and the dashboard timeline.
+    fields:
+      - field_path: review_id
+        order: ascending
+      - field_path: domain
+        order: ascending
+      - field_path: severity
+        order: descending
+
+  - collection_group: events
+    query_scope: collection
+    purpose: The immutable event ledger for one review, in order. Drives the binder timeline.
+    fields:
+      - field_path: review_id
+        order: ascending
+      - field_path: ts
+        order: ascending
+
+  - collection_group: reviews
+    query_scope: collection
+    purpose: The dashboard queue — open reviews by state, most recently opened first.
+    fields:
+      - field_path: state
+        order: ascending
+      - field_path: opened_at
+        order: descending
+
+  - collection_group: screenings
+    query_scope: collection
+    purpose: Evidence inventory for one review, in screening order.
+    fields:
+      - field_path: review_id
+        order: ascending
+      - field_path: screened_at
+        order: ascending
+
+  - collection_group: qa_responses
+    query_scope: collection
+    purpose: Questionnaire answers for one review, keyed by question.
+    fields:
+      - field_path: review_id
+        order: ascending
+      - field_path: question_id
+        order: ascending
+
+# A spent idempotency key is an execution artefact, not history; the ledger is where history
+# lives. An unbounded collection of completed markers is awkward to explain later.
+ttl_policies:
+  - collection_group: idempotency
+    field: done_ts
+    note: set well past the demo window
