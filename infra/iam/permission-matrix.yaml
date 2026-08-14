@@ -1,0 +1,193 @@
+# The permission matrix, as data.
+#
+# This is a deliverable, not just config: it appears in the README, the security diagram and
+# the video. apply_iam.sh reads this file, so the table a judge sees and the bindings in the
+# project cannot drift apart.
+#
+# Permissions are written at COLLECTION level rather than service level. That is not
+# pedantry. A row that says "Firestore" cannot express the difference between the
+# questionnaire agent writing qa_responses (which it must) and writing findings (which it
+# must never), so either the agent is over-permissioned or the parse cannot persist. Vague
+# permission rows are exactly how least-privilege claims quietly become false.
+
+version: 1
+
+identities:
+  - name: sa-orchestrator
+    display: Drawbridge orchestrator
+    purpose: Owns review state and the plan.
+    firestore:
+      read: [reviews, vendors, qa_responses, findings, scores, screenings]
+      write: [reviews, events]
+    pubsub: [publish, subscribe]
+    vertex_ai: true
+    storage: []
+    never:
+      - email
+      - any Storage role
+      - approvals write
+
+  - name: sa-questionnaire
+    display: Drawbridge questionnaire
+    purpose: Talks to the vendor. Holds nothing that can change the number.
+    firestore:
+      read: [reviews, vendors, qa_responses]
+      write: [qa_responses, events]
+    pubsub: [publish, subscribe]
+    vertex_ai: true
+    storage: []
+    email: via gateway only
+    never:
+      - findings write
+      - scores write
+      - approvals write
+      - any Storage read
+
+  - name: sa-evidence
+    display: Drawbridge evidence
+    purpose: Reads the most hostile content in the system and holds nothing to actuate it with.
+    firestore:
+      read: [reviews, vendors, qa_responses, evidence_chunks, subprocessors, findings]
+      write: [findings, evidence_chunks, subprocessors, events]
+    pubsub: [publish, subscribe]
+    vertex_ai: true
+    storage:
+      - bucket: evidence-clean
+        role: objectViewer
+    never:
+      - any egress
+      - email
+      - the quarantine bucket
+
+  - name: sa-scorer
+    display: Drawbridge scorer
+    purpose: Computes the Trust Score in code and writes one memo.
+    firestore:
+      read: [reviews, vendors, findings, screenings, scores]
+      write: [scores, findings, events]
+    pubsub: [publish, subscribe]
+    vertex_ai: true
+    storage: []
+    never:
+      - external calls
+      - approvals write
+
+  - name: sa-watchdog
+    display: Drawbridge watchdog
+    purpose: Post-approval monitoring. Fetches only from the feed allowlist.
+    firestore:
+      read: [reviews, vendors, scores, tasks]
+      write: [tasks, events]
+    pubsub: [publish]
+    vertex_ai: true
+    storage: []
+    egress: gateway allowlist only (policy P3)
+    never:
+      - approvals
+      - email
+      - vendor data write
+
+  - name: sa-armor
+    display: Drawbridge screening pipeline
+    purpose: >-
+      A real identity, not a convenience. The screening pipeline is a platform-owned stage, so
+      it runs as itself rather than as a developer credential — which is what makes "no agent
+      has a code path into quarantine" true rather than aspirational. It handles the rawest,
+      most hostile bytes in the system and is the one component structurally incapable of
+      prompting anything.
+    firestore:
+      read: [reviews, screenings]
+      write: [screenings, events]
+    pubsub: [publish]
+    vertex_ai: false
+    model_armor: modelarmor.user
+    storage:
+      - bucket: evidence-quarantine
+        role: objectViewer
+      - bucket: evidence-clean
+        role: objectCreator
+    never:
+      - any generative model call
+      - email
+      - findings write
+
+  - name: sa-portal
+    display: Drawbridge vendor portal
+    purpose: Token-scoped vendor-facing surface.
+    firestore:
+      read: [reviews, qa_responses]
+      write: [qa_responses, events]
+    pubsub: [publish]
+    vertex_ai: false
+    storage:
+      - bucket: evidence-quarantine
+        role: objectCreator
+    never:
+      - quarantine read
+      - findings write
+      - scores write
+      - approvals write
+
+  - name: sa-dashboard
+    display: Drawbridge dashboard
+    purpose: Internal review queue, timeline and gate cards.
+    firestore:
+      read: [reviews, vendors, findings, scores, screenings, approvals, events, tasks]
+      write: [events]
+    pubsub: [publish]
+    vertex_ai: false
+    storage:
+      - bucket: binders
+        role: objectViewer
+    never:
+      - approvals write
+      - any generative model call on a public route
+
+  - name: sa-approvals
+    display: Drawbridge approval service
+    purpose: >-
+      The only identity in the project that holds the private approval signing key. The
+      gateway holds the public half and nothing else, so the gateway can recognise a human
+      decision but is structurally incapable of manufacturing one.
+    firestore:
+      read: [reviews, findings, scores, approvals]
+      write: [approvals, events]
+    pubsub: [publish]
+    vertex_ai: false
+    secrets:
+      - drawbridge-approval-key      # private half; no other identity may access this
+    never:
+      - findings write
+      - scores write
+
+  - name: sa-binder
+    display: Drawbridge binder service
+    purpose: Renders the audit binder from a template, never from a model.
+    firestore:
+      read: [reviews, vendors, findings, scores, screenings, approvals, events, qa_responses, evidence_chunks, tasks]
+      write: []
+    pubsub: []
+    vertex_ai: false
+    trace: read
+    storage:
+      - bucket: binders
+        role: objectAdmin
+    never:
+      - any generative model call
+      - any write to the ledger
+
+# Denied actions asserted by tests/test_iam_boundaries.py. Each of these failing as expected
+# is a feature, and the collection-level cases are the ones that actually catch drift.
+denied_action_probes:
+  - identity: sa-questionnaire
+    action: write a document to findings
+  - identity: sa-evidence
+    action: write a document to approvals
+  - identity: sa-evidence
+    action: read an object from the quarantine bucket
+  - identity: sa-armor
+    action: call a generative model
+  - identity: sa-scorer
+    action: write a document to approvals
+  - identity: sa-watchdog
+    action: send an outbound email through the gateway
