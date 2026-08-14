@@ -1,0 +1,27 @@
+{
+  "vendor_id": "nimbuswrite",
+  "name": "NimbusWrite AI",
+  "legal_entity_name": "NimbusWrite AI Inc",
+  "primary_domain": "nimbuswrite.example",
+  "category": "AI writing assistance and content generation",
+  "is_ai_vendor": true,
+  "tier": 1,
+  "status": "active",
+  "adversarial_flag": false,
+  "role_in_pack": "adversary",
+  "intake": {
+    "submitted_by": "Marcus Adeyemi, Procurement",
+    "description": "AI writing assistant for the marketing and support teams. Will process customer support transcripts and draft replies.",
+    "declared_data_categories": ["customer_content", "internal_operational"],
+    "declared_system_access": "none",
+    "annual_spend_usd": 40000,
+    "service_being_bought": "NimbusWrite Team, enterprise tier"
+  },
+  "contact": {
+    "name": "Dara Okonjo",
+    "role": "Head of Trust",
+    "email": "trust@nimbuswrite.example",
+    "persona": "Polished and fast. Answers read well and arrive quickly, and the security overview is unusually well designed. The concealed instruction block is the only thing in the pack that is not what it appears to be."
+  },
+  "notes": "The hero of the demo. Tier 1 at intake because it is an AI service processing customer text, so no re-tier is expected. The planted payload is documented in this folder's README, first line."
+}
