@@ -303,17 +303,67 @@ def validate_transition(
     Args:
         current: the review's state as loaded from the ledger.
         target: the state the caller intends to write.
-        gate_scope: required when ``target`` is ``GATED``; the scope a ``GATED`` review is
-            released from determines which target is legal, so a contact-gate release may
-            only resume ``QUESTIONNAIRE_OUT`` and a decision-gate release may only reach
-            ``DECIDED``.
+        gate_scope: required when ``target`` is ``GATED``, and required when ``current`` is
+            ``GATED``. The scope a review is parked at decides which release is legal: a
+            contact gate may only resume ``QUESTIONNAIRE_OUT``, a decision gate may only
+            reach ``DECIDED``. Without the scope the two parks are indistinguishable and a
+            contact-gate release could approve a vendor nobody scored.
 
     Raises:
-        InvalidTransition: on any illegal pair, on a ``GATED`` target with no scope, or on
-            a release that does not match the scope the review was parked at. The caller
-            parks the review in ``NEEDS_HUMAN``; this function never corrects the target.
+        InvalidTransition: on any illegal pair, on a ``GATED`` state with no scope, or on a
+            release that does not match the scope the review was parked at. The caller parks
+            the review in ``NEEDS_HUMAN``; this function never corrects the target.
     """
-    raise NotImplementedError
+    allowed = ALLOWED.get(current)
+    if allowed is None:
+        raise InvalidTransition(f"{current} is not a state in the transition table")
+
+    if target not in allowed:
+        raise InvalidTransition(
+            f"{current} -> {target} is not a legal transition; "
+            f"legal targets are {sorted(s.value for s in allowed)}"
+        )
+
+    # NEEDS_HUMAN is reachable from everywhere and carries no scope of its own: a parked
+    # review's scope is preserved on the record so the release path still knows where it was.
+    if target is ReviewState.NEEDS_HUMAN:
+        return
+
+    if target is ReviewState.GATED and gate_scope is None:
+        raise InvalidTransition(
+            "a transition into GATED must state its gate_scope: 'contact' for the park "
+            "before first outbound contact, 'decision' for the park after scoring"
+        )
+
+    if current is ReviewState.GATED:
+        if gate_scope is None:
+            raise InvalidTransition(
+                f"releasing a GATED review to {target} requires the gate_scope it was "
+                "parked at; without it a contact-gate release is indistinguishable from a "
+                "decision-gate release"
+            )
+        expected = _GATE_RELEASE[gate_scope]
+        if target is not expected:
+            raise InvalidTransition(
+                f"a review parked at the {gate_scope!r} gate may only be released to "
+                f"{expected.value}, not {target.value}"
+            )
+
+
+_GATE_RELEASE: dict[GateScope, ReviewState] = {
+    "contact": ReviewState.QUESTIONNAIRE_OUT,
+    "decision": ReviewState.DECIDED,
+}
+"""Where each gate scope releases to.
+
+A contact gate authorises first outbound contact, so its release resumes the questionnaire. A
+decision gate is the risk acceptance, so its release is the decision itself. Nothing else is
+reachable from a park, which is what stops a contact approval from doubling as a vendor
+approval.
+"""
+
+_TERMINAL: frozenset[ReviewState] = frozenset({ReviewState.DECIDED})
+"""States whose record is immutable."""
 
 
 def is_terminal(state: ReviewState) -> bool:
@@ -321,5 +371,9 @@ def is_terminal(state: ReviewState) -> bool:
 
     A ``DECIDED`` review is immutable: later events append to the ledger and a new signal
     opens a new linked review rather than editing a closed one.
+
+    ``MONITORED`` is deliberately not terminal. Monitoring is an ongoing state a review sits
+    in after a decision, and the Watchdog re-enters it on every sweep; treating it as
+    immutable would stop the sweep recording that it ran.
     """
-    raise NotImplementedError
+    return state in _TERMINAL
