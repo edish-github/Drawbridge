@@ -48,6 +48,13 @@ def _local_mode_env():
     os.environ.setdefault("FIRESTORE_EMULATOR_HOST", FIRESTORE_HOST)
     os.environ.setdefault("PUBSUB_EMULATOR_HOST", PUBSUB_HOST)
     yield
+    # The console span exporter runs on a background thread. Without an explicit shutdown it
+    # flushes after pytest has closed stdout and prints a traceback that reads like a failure.
+    from opentelemetry import trace
+
+    provider = trace.get_tracer_provider()
+    if hasattr(provider, "shutdown"):
+        provider.shutdown()
 
 
 @pytest.fixture
