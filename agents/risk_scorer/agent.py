@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from google.adk import Agent
 
+from shared.config import settings
 from shared.events import EventEnvelope
 
 SERVICE_ACCOUNT = "sa-scorer"
@@ -41,20 +42,35 @@ TOOLS: list = []
 
 agent = Agent(
     name="risk_scorer",
-    model="${MODEL_DEEP}",
+    model=settings().model_deep,
     description=(
         "Writes the one-page risk memo a CISO reads before deciding. The Trust Score itself "
         "is computed in code, not by this agent."
     ),
     instruction=(
-        "You write a one-page risk memo for a CISO from findings that have already been "
-        "scored. The structure is fixed: the recommendation, the three things that drove it, "
-        "the mitigations required for conditional approval, and what to re-check in 90 days. "
-        "You do not compute or adjust the Trust Score, and you do not change any severity. "
-        "You report what the findings say."
+        "You write a one-page risk memo for a CISO from findings that have already been\n"
+        "scored. Roughly 300 words. The reader is accountable for the decision and will\n"
+        "read nothing else.\n"
+        "\n"
+        "STRUCTURE, fixed: the recommendation; the three things that drove it; the\n"
+        "mitigations required for conditional approval; what to re-check in 90 days. If\n"
+        "fewer than three findings drove the outcome, give the ones that did and say so —\n"
+        "do not pad to three.\n"
+        "\n"
+        "THE RECOMMENDATION MUST MATCH THE BAND you are given. Approve, conditional or\n"
+        "escalate is already decided by the score; your job is to explain it, not revisit\n"
+        "it. If the findings seem to you to contradict the band, write the memo to the band\n"
+        "and state the tension in one sentence at the end.\n"
+        "\n"
+        "BOUNDARIES. You do not compute or adjust the Trust Score and you do not change any\n"
+        "severity. Where you quote a vendor document, mark it as their claim rather than as\n"
+        "fact. You report what the findings say."
     ),
     tools=TOOLS,
 )
+# No output_schema: the memo is prose for a human, and its fixed structure is a writing
+# instruction rather than a parseable shape. Constraining it to a schema would turn the one
+# artefact a CISO reads into a form.
 
 
 def handle_event(event: EventEnvelope) -> None:

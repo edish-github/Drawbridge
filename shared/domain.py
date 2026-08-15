@@ -178,6 +178,73 @@ class ScoreResult(BaseModel):
     adversarial_applied: bool = False
 
 
+# --- Model output schemas ------------------------------------------------------------------
+#
+# What an agent emits, as distinct from what gets persisted. The types below are attached to
+# agents as ``output_schema``, so malformed output is rejected by the framework rather than
+# parsed hopefully downstream.
+#
+# The distinction is deliberate everywhere it appears. A model emits a ``FindingDraft``; the
+# persisted ``Finding`` adds ``finding_id``, ``trace_ref`` and — most importantly — ``source``,
+# which records whether the conclusion was arithmetic or judgement. A model must not be able to
+# claim its own finding was computed by a rule, so the field it would need is not in its schema.
+# The same holds for ``ReviewPlan`` against the persisted plan, which carries the plan version
+# and inherited idempotency keys the model has no business setting.
+
+
+class PlanStep(BaseModel):
+    """One step of a review plan.
+
+    ``name`` must come from the step vocabulary supplied in the planning prompt. Step names are
+    deterministic from workflow position because the idempotency key is derived from them.
+    """
+
+    name: str
+    params: dict = Field(default_factory=dict)
+
+
+class ReviewPlan(BaseModel):
+    """The Orchestrator's planning output.
+
+    ``needs_human`` is the defined non-compliance path: when the work required has no name in
+    the step vocabulary, the model returns ``needs_human=True`` with a reason rather than
+    inventing a step name that nothing downstream can execute.
+    """
+
+    tier: Literal[1, 2, 3]
+    reason: str
+    steps: list[PlanStep] = Field(default_factory=list)
+    needs_human: bool = False
+
+
+class FindingDraft(BaseModel):
+    """A finding as the Evidence agent emits it, before persistence.
+
+    Carries no ``source`` field: provenance is assigned by the code that persists it, so a
+    model cannot label its own judgement as a rule.
+    """
+
+    domain: str
+    severity: Severity
+    contradiction: bool
+    summary: str
+    evidence_ref: str | None = None
+    claim_ref: str | None = None
+
+
+class RelevanceJudgement(BaseModel):
+    """The Watchdog's assessment of one signal against one vendor.
+
+    ``confidence`` is what separates a re-review from a triage card, which is why it is a
+    required field rather than an optional annotation on a boolean.
+    """
+
+    relevant: bool
+    confidence: float = Field(ge=0.0, le=1.0)
+    reason: str
+    source_url: str
+
+
 ALLOWED: dict[ReviewState, set[ReviewState]] = {
     # GATED here carries gate_scope="contact": the park before first outbound contact.
     ReviewState.INTAKE: {ReviewState.QUESTIONNAIRE_OUT, ReviewState.NEEDS_HUMAN},

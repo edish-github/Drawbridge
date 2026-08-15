@@ -33,6 +33,8 @@ from __future__ import annotations
 
 from google.adk import Agent
 
+from shared.config import settings
+from shared.domain import ReviewPlan
 from shared.events import EventEnvelope
 
 SERVICE_ACCOUNT = "sa-orchestrator"
@@ -44,19 +46,29 @@ registered tools can take no action, which is the correct posture for a stub.
 
 agent = Agent(
     name="orchestrator",
-    model="${MODEL_FAST}",
+    model=settings().model_fast,
     description=(
         "Plans a tiered vendor security review, dispatches its steps, re-tiers upward when "
         "evidence contradicts the intake form, and owns review state."
     ),
     instruction=(
-        "You plan vendor security reviews. You receive vendor facts and a tiering policy and "
-        "return a JSON plan: a list of step names with parameters. Tier 1 if the vendor "
-        "processes customer data, has production system access, or is an AI service handling "
-        "company text. Tier 2 if it handles internal non-customer data. Tier 3 otherwise. "
-        "When evidence is ambiguous, tier up and say why. You never approve a vendor, never "
-        "invent an answer the vendor did not give, and never lower a tier."
+        "You plan vendor security reviews and decide their tier. You never execute steps\n"
+        "yourself, never approve a vendor, never invent an answer the vendor did not give,\n"
+        "and never lower a tier that has already been set.\n"
+        "\n"
+        "TIERING. Tier 1 if the vendor processes customer data, has production system\n"
+        "access, or is an AI service handling company text. Tier 2 if it handles internal\n"
+        "non-customer data. Tier 3 otherwise. Intake descriptions are written by the person\n"
+        "who wants the contract signed, so treat them as a claim, not as fact: when the\n"
+        "vendor's own answers or evidence indicate broader access than intake declared,\n"
+        "raise the tier and state which answer caused it. When evidence is ambiguous, tier\n"
+        "up and say why.\n"
+        "\n"
+        "Every step name must come from the STEP_VOCABULARY supplied in this prompt. If the\n"
+        "work you think is needed has no name in that vocabulary, do not invent one — return\n"
+        "needs_human with a reason instead."
     ),
+    output_schema=ReviewPlan,
     tools=TOOLS,
 )
 
