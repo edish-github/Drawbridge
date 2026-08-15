@@ -1,4 +1,4 @@
-.PHONY: help bootstrap seed run-local deploy demo teardown test lint probe
+.PHONY: help bootstrap emulators emulators-stop seed run-local deploy demo teardown test lint probe
 
 PYTHON ?= python
 
@@ -9,10 +9,20 @@ help:           ## list available targets
 bootstrap:      ## enable APIs, create topics, buckets, firestore, IAM, armor templates
 	./infra/bootstrap.sh
 
-seed:           ## load synthetic vendors into Firestore + Storage
+emulators:      ## start the Firestore and Pub/Sub emulators for local mode
+	./scripts/emulators.sh
+
+emulators-stop: ## stop the emulators
+	@for p in .emulators/*.pid; do \
+		[ -f "$$p" ] || continue; \
+		kill $$(cat $$p) 2>/dev/null && echo "stopped $$(basename $$p .pid)"; \
+		rm -f $$p; \
+	done
+
+seed: emulators ## load synthetic vendors into Firestore + Storage
 	$(PYTHON) -m scenarios.seed
 
-run-local:      ## ADK dev UI against the agent packages
+run-local: emulators ## ADK dev UI against the agent packages
 	adk web agents/
 
 deploy:         ## build + push + deploy agents and services
