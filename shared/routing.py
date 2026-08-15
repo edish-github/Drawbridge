@@ -1,4 +1,4 @@
-"""Model routing and per-review cost accounting. Fast-first economics.
+"""Model routing and per-review cost accounting. Fast-first economics, one code path.
 
 The fast model is the default for parsing, extraction, classification and chasing. The deep
 model is spent in exactly two places — cross-examination and the risk memo — and saying
@@ -10,43 +10,88 @@ over those severities. A routing entry here would re-open the one hole in the st
 architectural claim in the project — the model judges severity, the code computes the number,
 so no agent holds the pen on its own metric. It must not come back.
 
-Per-review cost accumulates on the review record, which is what produces the per-review
-figure. The ceiling is enforced rather than observed: exceeding it parks the review and
-stops further model calls.
+Both backends are reached through one client surface: ``google-genai`` takes either an API key
+or a Vertex AI project, and ``models.generate_content`` is identical either way. Local mode is
+therefore the same code path as cloud with a different credential, not a parallel
+implementation that has to be kept in step.
+
+Per-review cost accumulates on the review record. **The ceiling is enforced, not observed:**
+crossing it parks the review in ``NEEDS_HUMAN`` and stops further model calls. A budget that is
+observed rather than enforced is not a control, and more practically it is what stands between
+the credits and a runaway retry loop at two in the morning.
 
 Failure semantics: a task name with no routing entry raises rather than falling back to a
 default model — an unrouted task is a bug, and a silent fallback would make the cost story
-untrue. A model call failure propagates after the span records it; the caller decides
-between a retry and parking the review. Exceeding the cost ceiling raises
-``CostCeilingExceeded`` from inside cost accumulation, so the effect stops at the call that
-crossed the line rather than at the next check.
+untrue. Cost is accumulated *after* the call returns, because a call that failed still consumed
+tokens if it produced usage metadata and consumed none if it did not. Exceeding the ceiling
+raises from inside accumulation, so the effect stops at the call that crossed the line rather
+than at the next check.
 """
 
 from __future__ import annotations
 
+import json
+import logging
+from typing import Any
+
 from pydantic import BaseModel
 
-from shared.gateway import CostCeilingExceeded  # noqa: F401  (re-exported for callers)
+from shared.clients import firestore_client, genai_client
+from shared.config import settings
+from shared.telemetry import span
+
+log = logging.getLogger("drawbridge.routing")
+
+FAST = "MODEL_FAST"
+DEEP = "MODEL_DEEP"
+EMBED = "MODEL_EMBED"
+LOCAL = "MODEL_LOCAL"
 
 ROUTING: dict[str, str] = {
-    "parse_reply": "MODEL_FAST",
-    "extract_controls": "MODEL_FAST",
-    "chase_message": "MODEL_FAST",
-    "followup_question": "MODEL_FAST",
-    "classify_data_scope": "MODEL_FAST",
-    "relevance": "MODEL_FAST",
-    "embed_evidence": "MODEL_EMBED",
-    "cross_examine": "MODEL_DEEP",
-    "risk_memo": "MODEL_DEEP",
-    "pii_scrub": "MODEL_LOCAL",
+    "parse_reply": FAST,
+    "extract_controls": FAST,
+    "chase_message": FAST,
+    "classify_data_scope": FAST,
+    "followup_question": FAST,
+    "relevance": FAST,
+    "cross_examine": DEEP,
+    "risk_memo": DEEP,
+    "embed_evidence": EMBED,
 }
-"""Task name to the settings key naming the model that serves it. Values are resolved
-through ``shared.config`` at call time so the mapping stays declarative and testable.
+"""Task name to the settings key naming the model that serves it.
+
+No ``score_rubric``. Scoring is arithmetic; if an entry for it ever appears here, the claim
+that no agent holds the pen on its own metric has quietly stopped being true.
 """
+
+# USD per million tokens. Source: Google's published Gemini API pricing page, read 16 Aug 2026.
+# TODO(verify): confirm these against the billing console once real spend exists — the
+# sub-$0.50-per-review headline is only as honest as this table, and a rate that moved is a
+# number said out loud on camera that is wrong.
+RATES_USD_PER_MTOK: dict[str, dict[str, float]] = {
+    FAST: {"input": 0.30, "output": 2.50},
+    DEEP: {"input": 1.25, "output": 10.00},
+    EMBED: {"input": 0.15, "output": 0.0},
+    LOCAL: {"input": 0.0, "output": 0.0},  # self-hosted; compute cost is not per token
+}
+
+COLLECTION_REVIEWS = "reviews"
 
 
 class UnroutedTask(Exception):
     """A task name with no routing entry. A bug, never a fallback."""
+
+
+class CostCeilingExceeded(Exception):
+    """The review's accumulated spend passed the configured ceiling."""
+
+    def __init__(self, review_id: str, total: float, ceiling: float) -> None:
+        super().__init__(
+            f"review {review_id} reached ${total:.4f} against a ${ceiling:.2f} ceiling"
+        )
+        self.review_id = review_id
+        self.total = total
+        self.ceiling = ceiling
 
 
 class ModelResult(BaseModel):
@@ -55,39 +100,137 @@ class ModelResult(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     cost_usd: float
-    parsed: dict | None = None
+    parsed: Any = None
 
 
-def generate(task: str, prompt: str, ctx) -> ModelResult:
-    """Run ``task``'s prompt against its routed model inside a cost-recording span.
+def model_for(task: str) -> tuple[str, str]:
+    """Return the ``(settings_key, model_id)`` serving ``task``.
 
     Raises:
         UnroutedTask: when ``task`` is not in ``ROUTING``.
-        CostCeilingExceeded: when this call's cost pushes the review past its ceiling. The
-            review parks in ``NEEDS_HUMAN`` with a cost card and further model calls stop.
-        GoogleAPICallError: propagated after the span records the failure.
     """
-    raise NotImplementedError
+    key = ROUTING.get(task)
+    if key is None:
+        raise UnroutedTask(
+            f"{task!r} has no routing entry. Add one to ROUTING — there is deliberately no "
+            "default model, because a silent fallback makes the cost figure untrue."
+        )
+    cfg = settings()
+    return key, {
+        FAST: cfg.model_fast,
+        DEEP: cfg.model_deep,
+        EMBED: cfg.model_embed,
+        LOCAL: cfg.model_local,
+    }[key]
+
+
+def estimate_cost(rate_key: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """Return the USD cost of one call. Pure arithmetic over the rate table."""
+    rates = RATES_USD_PER_MTOK[rate_key]
+    return (prompt_tokens * rates["input"] + completion_tokens * rates["output"]) / 1_000_000
+
+
+def generate(
+    task: str,
+    prompt: str,
+    ctx,
+    *,
+    response_schema: Any = None,
+    temperature: float = 0.0,
+) -> ModelResult:
+    """Run ``task``'s prompt against its routed model inside a cost-recording span.
+
+    Args:
+        task: a key in ``ROUTING``.
+        prompt: the fully rendered prompt.
+        ctx: carries ``review_id`` and ``agent`` for the span and the cost record.
+        response_schema: a Pydantic model or ``list[Model]`` to enforce structured output.
+        temperature: defaults to 0. Severity judgements feed an arithmetic score, so the same
+            evidence must produce the same answer every run; sampling would put noise directly
+            into the number.
+
+    Raises:
+        UnroutedTask: when ``task`` has no routing entry.
+        CostCeilingExceeded: when this call pushed the review past its ceiling. The review is
+            parked before the exception is raised.
+        google.genai.errors.APIError: propagated after the span records the failure.
+    """
+    rate_key, model_id = model_for(task)
+
+    with span(f"model.{task}", ctx, model=model_id, task=task) as s:
+        config: dict[str, Any] = {"temperature": temperature}
+        if response_schema is not None:
+            config["response_mime_type"] = "application/json"
+            config["response_schema"] = response_schema
+
+        response = genai_client().models.generate_content(
+            model=model_id, contents=prompt, config=config
+        )
+
+        usage = response.usage_metadata
+        prompt_tokens = getattr(usage, "prompt_token_count", 0) or 0
+        completion_tokens = getattr(usage, "candidates_token_count", 0) or 0
+        cost = estimate_cost(rate_key, prompt_tokens, completion_tokens)
+
+        s.set_attribute("tokens.prompt", prompt_tokens)
+        s.set_attribute("tokens.completion", completion_tokens)
+        s.set_attribute("cost_usd", cost)
+
+        text = response.text or ""
+        parsed = None
+        if response_schema is not None and text:
+            parsed = getattr(response, "parsed", None)
+            if parsed is None:
+                # The SDK populates `parsed` when it can; falling back to the raw JSON keeps a
+                # schema-constrained call usable rather than silently returning nothing.
+                parsed = json.loads(text)
+
+        result = ModelResult(
+            text=text,
+            model=model_id,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_usd=cost,
+            parsed=parsed,
+        )
+
+        review_id = getattr(ctx, "review_id", None)
+        if review_id:
+            accumulate_review_cost(review_id, cost)
+
+        return result
 
 
 def embed(text: str, ctx) -> list[float]:
     """Return the embedding for ``text`` using the configured embedding model.
 
     Raises:
-        Nothing on failure. Embedding is an optional control: the caller logs a
-        degraded-mode warning and cross-examination falls back to whole-document context.
-        Retrieval is never on the critical path.
+        Nothing on failure. Embedding is an optional control: this logs a degraded-mode
+        warning and returns an empty list, and cross-examination falls back to whole-document
+        context. Retrieval is never on the critical path.
     """
-    raise NotImplementedError
+    rate_key, model_id = model_for("embed_evidence")
+    try:
+        with span("model.embed_evidence", ctx, model=model_id) as s:
+            response = genai_client().models.embed_content(model=model_id, contents=text)
+            values = list(response.embeddings[0].values)
+            s.set_attribute("embedding.dimensions", len(values))
 
-
-def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
-    """Return the USD cost of one call. Pure arithmetic over the published rate card.
-
-    TODO(verify): the current per-token rates for the fast, deep and embedding models. The
-    published per-review figure is only as honest as this table.
-    """
-    raise NotImplementedError
+            # Embedding usage is billed on input characters rather than reported tokens on
+            # every backend, so this is an estimate flagged as one rather than a silent zero.
+            approx_tokens = max(1, len(text) // 4)
+            cost = estimate_cost(rate_key, approx_tokens, 0)
+            s.set_attribute("cost_usd", cost)
+            review_id = getattr(ctx, "review_id", None)
+            if review_id:
+                accumulate_review_cost(review_id, cost)
+            return values
+    except Exception as exc:  # noqa: BLE001 — optional control, degrades rather than blocks
+        log.warning(
+            "degraded mode: embedding unavailable, falling back to whole-document context: %s",
+            exc,
+        )
+        return []
 
 
 def accumulate_review_cost(review_id: str, cost: float) -> float:
@@ -95,6 +238,37 @@ def accumulate_review_cost(review_id: str, cost: float) -> float:
 
     Raises:
         CostCeilingExceeded: when the total passes the configured ceiling, after parking the
-            review. A budget that is observed rather than enforced is not a control.
+            review. Retries and model calls stop at the call that crossed the line.
     """
-    raise NotImplementedError
+    from google.cloud import firestore
+
+    cfg = settings()
+    ref = firestore_client().collection(COLLECTION_REVIEWS).document(review_id)
+    ref.set({"cost_usd": firestore.Increment(cost)}, merge=True)
+
+    snap = ref.get()
+    total = float((snap.to_dict() or {}).get("cost_usd", 0.0))
+
+    if total > cfg.cost_ceiling_per_review_usd:
+        park(review_id, reason="cost_ceiling")
+        raise CostCeilingExceeded(review_id, total, cfg.cost_ceiling_per_review_usd)
+    return total
+
+
+def park(review_id: str, *, reason: str) -> None:
+    """Move a review to ``NEEDS_HUMAN`` with a stated reason and surface it on the dashboard.
+
+    Lives here rather than in a service module because three kernel modules need it — the cost
+    ceiling, the screening pipeline and output screening all park — and a review that is
+    parked by one path and not another is the kind of inconsistency nobody finds until a demo.
+    """
+    from shared.domain import ReviewState
+
+    firestore_client().collection(COLLECTION_REVIEWS).document(review_id).set(
+        {
+            "state": ReviewState.NEEDS_HUMAN.value,
+            "park_reason": reason,
+        },
+        merge=True,
+    )
+    log.warning("PARKED review=%s reason=%s", review_id, reason)
