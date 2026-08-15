@@ -29,11 +29,28 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install emulators
+        run: gcloud components install cloud-firestore-emulator pubsub-emulator beta --quiet
+
+      - name: Start emulators
+        run: ./scripts/emulators.sh
+        env:
+          PROJECT_ID: drawbridge-ci
+
       - name: Lint
         run: ruff check .
 
       - name: Test
+        # No model call and no cloud call: the emulators need no credentials and no billing
+        # account, so the resume and idempotency suites run on every push for free.
         run: pytest -q
+        env:
+          RUNTIME_MODE: local
+          GEMINI_API_KEY: ci-placeholder-no-model-calls
+          FIRESTORE_EMULATOR_HOST: localhost:8080
+          PUBSUB_EMULATOR_HOST: localhost:8085
 
   contracts:
     runs-on: ubuntu-latest
