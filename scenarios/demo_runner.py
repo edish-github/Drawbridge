@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 import uuid
 from datetime import UTC, datetime
 
@@ -46,9 +47,12 @@ BEATS = (
     "contact_gate_parked",
     "contact_gate_released",
     "questionnaire_sent",
-    "replies_parsed",
+    # Mid-correspondence, and the order says so: the re-tier fires on the batch that reveals the
+    # broader scope, while replies are still arriving. A re-tier after the thread closed would be
+    # a report about the review rather than a correction to it.
     "retier",
     "additional_questions_sent",
+    "replies_parsed",
     "evidence_screened",
     "findings_ready",
     "scored",
@@ -251,6 +255,16 @@ def _run(vendor: str) -> list[str]:
     approve(demo.review_id, scope="decision")
     demo.drain()
     demo.require("decided", demo.review().state is ReviewState.DECIDED)
+
+    # --- the binder ---------------------------------------------------------------------------
+    # Rendered as part of the run rather than left to a separate command, because the export is
+    # a demo beat and a beat that is not exercised on every run is a beat that breaks on camera.
+    from services.binder.render import write as write_binder
+
+    started = time.monotonic()
+    path = write_binder(demo.review_id)
+    log.info("binder rendered in %.2fs → %s", time.monotonic() - started, path)
+    demo.require("binder_rendered", path.exists() and path.stat().st_size > 0)
 
     return demo.fired
 

@@ -25,3 +25,4 @@ out/
 infra/CAPABILITY-REPORT.md
 .emulators/
 .local-storage/
+.binders/
