@@ -55,6 +55,31 @@ ALL_TOPICS: tuple[str, ...] = (
     TOPIC_WATCHDOG_HIT,
 )
 
+EXPECTED_STATES: dict[str, set[ReviewState]] = {
+    TOPIC_REVIEW_INTAKE: {ReviewState.INTAKE},
+    TOPIC_REVIEW_PLAN_READY: {ReviewState.QUESTIONNAIRE_OUT},
+    TOPIC_VENDOR_REPLY_RECEIVED: {ReviewState.QUESTIONNAIRE_OUT, ReviewState.REPLIES_IN},
+    TOPIC_VENDOR_EVIDENCE_UPLOADED: {
+        ReviewState.QUESTIONNAIRE_OUT,
+        ReviewState.REPLIES_IN,
+        ReviewState.EVIDENCE_REVIEW,
+    },
+    TOPIC_EVIDENCE_SCREENED: {ReviewState.REPLIES_IN, ReviewState.EVIDENCE_REVIEW},
+    TOPIC_REVIEW_FINDINGS_READY: {ReviewState.EVIDENCE_REVIEW},
+    TOPIC_REVIEW_SCORE_READY: {ReviewState.EVIDENCE_REVIEW, ReviewState.SCORED},
+    TOPIC_REVIEW_APPROVED: {ReviewState.GATED},
+    TOPIC_REVIEW_RESCORE: {ReviewState.EVIDENCE_REVIEW, ReviewState.SCORED, ReviewState.GATED},
+    TOPIC_WATCHDOG_SWEEP: {ReviewState.MONITORED},
+    TOPIC_WATCHDOG_HIT: {ReviewState.DECIDED, ReviewState.MONITORED},
+}
+"""The states in which each event makes sense, declared once rather than per consumer.
+
+The subscriber applies these before dispatch, so out-of-phase handling is uniform across the
+fleet instead of being whatever each handler remembered to check. A topic with no entry here
+cannot be consumed — which is the point: adding a topic forces a decision about when its events
+are in phase, rather than leaving it to whichever consumer is written first.
+"""
+
 DLQ_SUFFIX = ".dlq"
 MAX_DELIVERY_ATTEMPTS = 5
 ACK_DEADLINE_SECONDS = 60
@@ -135,10 +160,12 @@ def publish(topic: str, review_id: str, payload: dict, *, ctx) -> str:
             "infra/bootstrap.sh together — CI checks that the three agree."
         )
 
+    # A context declares idem_key and leaves it None outside a guarded step, so the fallback is
+    # `or` rather than a getattr default: the attribute exists, it is simply not set yet.
     envelope = EventEnvelope(
         type=topic,
         review_id=review_id,
-        idem_key=getattr(ctx, "idem_key", f"{review_id}:plan_v1:{topic}"),
+        idem_key=getattr(ctx, "idem_key", None) or f"{review_id}:plan_v1:{topic}",
         trace_id=getattr(ctx, "trace_id", uuid.uuid4().hex),
         source=getattr(ctx, "agent", "unknown"),
         payload=payload,

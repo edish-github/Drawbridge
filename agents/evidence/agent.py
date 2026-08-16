@@ -35,7 +35,7 @@ from __future__ import annotations
 from google.adk import Agent
 
 from shared.config import settings
-from shared.domain import FindingDraft
+from shared.domain import FindingDraft, Review
 from shared.events import EventEnvelope
 
 SERVICE_ACCOUNT = "sa-evidence"
@@ -81,8 +81,11 @@ agent = Agent(
 )
 
 
-def handle_event(event: EventEnvelope) -> None:
-    """Pub/Sub entrypoint. Routes by ``event.type`` after the state guard.
+def handle_event(event: EventEnvelope, review: Review) -> None:
+    """Pub/Sub entrypoint. Routes by ``event.type``.
+
+    The state guard runs in ``shared.subscriber`` before dispatch, so ``review`` arrives loaded
+    and in phase.
 
     Raises:
         NotImplementedError: contract only.
