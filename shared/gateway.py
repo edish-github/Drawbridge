@@ -53,11 +53,26 @@ DEEP_MODEL_TOOLS: frozenset[str] = frozenset({"risk_memo"})
 memo is the artefact a human acts on.
 """
 
-FEED_ALLOWLIST: frozenset[str] = frozenset()
+FEED_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "www.cisa.gov",
+        "services.nvd.nist.gov",
+        "krebsonsecurity.com",
+        "www.bleepingcomputer.com",
+    }
+)
 """Hosts the Watchdog may fetch from under P3. Everything else is blocked and logged.
 
-Empty by default and deliberately so: an allowlist that ships pre-populated with plausible
-hosts is an allowlist nobody reviews. Feeds are added explicitly when the Watchdog is built.
+Four, named individually rather than by wildcard, because a wildcard on a hosting provider is
+an allowlist of everyone who bought a subdomain there. Two advisory sources and two established
+outlets, in that order of weight: advisories carry stable formats and near-zero false-positive
+rates, which is what a relevance threshold needs to mean anything. A news aggregator would flood
+the confidence filter with restated versions of the same advisory and teach the threshold
+nothing.
+
+An entry here is an assertion that the fleet may open a connection to that host. Adding one is a
+security decision, so it is a diff in this file rather than a configuration value somebody sets
+at deploy time.
 """
 
 TOOL_REGISTRY: dict[str, Callable[..., Any]] = {}

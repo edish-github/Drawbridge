@@ -258,6 +258,27 @@ def test_p3_blocks_a_fetch_outside_the_allowlist(review_id):
         call_tool("fetch_url", ctx(review_id), url="https://not-a-feed.example/data")
 
 
+def test_the_feed_allowlist_names_hosts_rather_than_patterns():
+    """A wildcard on a hosting provider allowlists everyone who bought a subdomain there."""
+    from shared.gateway import FEED_ALLOWLIST
+
+    assert FEED_ALLOWLIST, "an empty allowlist means the Watchdog can fetch nothing"
+    for host in FEED_ALLOWLIST:
+        assert "*" not in host and "/" not in host
+        assert host == host.lower()
+
+
+@emulator_required
+def test_p3_admits_a_host_on_the_allowlist(review_id):
+    """The allowlist has to admit something, or P3 is indistinguishable from egress being off."""
+    from shared.gateway import FEED_ALLOWLIST
+
+    register_tool("fetch_url", lambda **kw: "advisory body")
+    host = sorted(FEED_ALLOWLIST)[0]
+
+    assert call_tool("fetch_url", ctx(review_id), url=f"https://{host}/feed") == "advisory body"
+
+
 @emulator_required
 def test_an_unregistered_tool_is_never_dispatched(review_id):
     with pytest.raises(UnknownTool):
