@@ -1,0 +1,46 @@
+---
+title: "Drawbridge — Trust scoring: the model judges severity, the code computes the score"
+---
+flowchart TB
+  F["<b>Findings from the Evidence agent</b><br/>domain · severity · contradiction · <b>the retrieved passage that supports them</b><br/>each labelled <b>source = rule</b> (arithmetic) or <b>source = model</b> (judgement)<br/>a finding turning on a date also carries <b>date_source</b>: extracted, declared or computed"]
+  RUB[("<b>rubric.yaml</b> — configuration, not prompt")]
+  DOM["<b>Seven weighted domains · Tier 1 · totalling 100</b><br/>data protection and encryption <b>20</b> · access control and identity <b>15</b><br/>incident response and breach history <b>15</b> · compliance posture and certifications <b>15</b><br/>subprocessor and fourth-party chain <b>15</b> · business continuity, RTO and RPO <b>10</b><br/>AI-specific handling — training-data use, model provider chain, output controls <b>10</b><br/><b>Scored over the domains the plan asked about</b>, renormalised to 100 —<br/>not over the tier profile. A freight vendor is not given ten free points<br/>in a domain nobody put a question to"]
+  CALC["<b>Deterministic arithmetic in Python</b><br/>every domain starts at its maximum; penalties subtract by severity —<br/>low 2 · medium 5 · high 10<br/><b>No contradiction multiplier.</b> The anchors price a contradicted claim<br/>the moment the severity is assigned, so no fact is priced twice"]
+  MOD{"<b>Adversarial Conduct flag set?</b>"}
+  PEN["<b>−25 trust points and forced escalation</b><br/>the band ignores the arithmetic, and the flag<br/>is written to the vendor record for good"]
+  BAND{"<b>Band</b>"}
+  B1["<b>80 to 100</b><br/>approve"]
+  B2["<b>60 to 79</b><br/>conditional, mitigations required"]
+  B3["<b>under 60</b><br/>escalate"]
+  MEMO["<b>One Gemini 3.7 Flash call — the CISO memo</b><br/>the recommendation, the three things that drove it,<br/>the mitigations required for conditional approval,<br/>and what to re-check in ninety days"]
+  GATE["<b>G1 · human risk acceptance</b><br/>approve, conditional or reject, with conditions<br/>and a named identity written to the ledger"]
+  SHOW["<b>Shown, not asserted</b> — the computation goes into<br/>the binder, so anyone who asks <i>why 64?</i> gets the arithmetic"]
+  GAME["<b>Why an agent here cannot game its own metric</b><br/>the model judges severity, the code computes the score —<br/>self-improvement never touches the number.<br/>There is no model call anywhere in this pipeline except the memo."]
+  TRUST["<b>The number is a Trust Score · 0 to 100 · higher is safer</b><br/>prose may say a vendor <i>raised your risk</i>;<br/>the score always <b>falls</b>"]
+
+  F --> CALC
+  RUB --> DOM --> CALC
+  CALC --> MOD
+  MOD -- "yes" --> PEN --> BAND
+  MOD -- "no" --> BAND
+  BAND --> B1 --> MEMO
+  BAND --> B2 --> MEMO
+  BAND --> B3 --> MEMO
+  MEMO --> OUTSCR["<b>Output screening</b><br/>drawbridge-output template —<br/>the memo is checked before Elena reads it"]
+  OUTSCR --> GATE
+  CALC -.-> SHOW
+  CALC -.-> GAME
+  BAND -.-> TRUST
+
+  classDef inp fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a
+  classDef dom fill:#e0f2fe,stroke:#0369a1,stroke-width:2px,color:#0c4a6e
+  classDef calc fill:#dcfce7,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef danger fill:#fee2e2,stroke:#b91c1c,stroke-width:2.5px,color:#7f1d1d
+  classDef human fill:#ffedd5,stroke:#c2410c,stroke-width:2px,color:#7c2d12
+  classDef note fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
+  class F,RUB inp
+  class DOM dom
+  class CALC,MOD,BAND,B1,B2 calc
+  class PEN,B3 danger
+  class MEMO,GATE,OUTSCR human
+  class SHOW,GAME,TRUST note

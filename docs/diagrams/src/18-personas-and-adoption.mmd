@@ -1,0 +1,46 @@
+---
+title: "Drawbridge — Who touches the fleet, and how a second department adopts it"
+---
+flowchart TB
+  subgraph SEC["SECURITY — the department that owns the fleet today"]
+    direction LR
+    PRIYA["<b>Priya · Security Analyst</b><br/>owns fifteen concurrent reviews<br/>wants the fleet to do the reading and the<br/>chasing while she makes the judgement calls"]
+    ELENA["<b>Elena · CISO</b><br/>signs risk acceptances at G1<br/>cares that every decision is defensible<br/>and traceable months later"]
+  end
+
+  subgraph BIZ["THE BUSINESS — the people whose deals stall behind the review"]
+    direction LR
+    MARCUS["<b>Marcus · Procurement Manager</b><br/>discovers the fleet in the Agent Registry,<br/>kicks off reviews, watches cycle time<br/>because a stalled review stalls a contract"]
+  end
+
+  subgraph EXT["OUTSIDE THE TRUST BOUNDARY"]
+    direction LR
+    VENDOR["<b>The vendor contact</b><br/>receives the questionnaire, uploads evidence,<br/>occasionally adversarial"]
+    AUDITOR["<b>The auditor</b><br/>never logs in — receives the binder.<br/>The reason the observability layer exists"]
+  end
+
+  FLEET["<b>Vendor Review Fleet v1.2</b><br/>published, versioned and discoverable<br/>in the Agent Registry"]
+  LEGAL["<b>J6 · Legal finds the fleet in the Registry</b><br/>and asks for access to run contract reviews"]
+  SAFE["<b>Why the answer can be yes</b><br/>identity scoping, gateway policy and per-agent least privilege<br/>mean a second department gets its own scoped access —<br/>not a copy of the system and not a shared credential.<br/><br/>Governance is what makes cross-department adoption safe,<br/>and cross-department adoption is what the track asks for."]
+
+  MARCUS -- "J1 · submits a vendor" --> FLEET
+  FLEET -- "G2 · approve first contact, enforced by P1" --> PRIYA
+  FLEET -- "questionnaire and chases" --> VENDOR
+  VENDOR -- "answers and evidence" --> FLEET
+  FLEET -- "risk memo at G1" --> ELENA
+  ELENA -- "decision, by name" --> FLEET
+  FLEET -- "J5 · audit binder" --> AUDITOR
+  FLEET -- "J4 · re-review opened" --> PRIYA
+  LEGAL -.-> FLEET
+  FLEET -.-> SAFE
+
+  classDef sec fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a
+  classDef biz fill:#ffedd5,stroke:#c2410c,stroke-width:2px,color:#7c2d12
+  classDef ext fill:#fee2e2,stroke:#b91c1c,stroke-width:2px,color:#7f1d1d
+  classDef fleet fill:#dcfce7,stroke:#15803d,stroke-width:2.5px,color:#14532d
+  classDef note fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
+  class PRIYA,ELENA sec
+  class MARCUS biz
+  class VENDOR,AUDITOR ext
+  class FLEET,LEGAL fleet
+  class SAFE note

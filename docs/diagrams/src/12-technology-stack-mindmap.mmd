@@ -1,0 +1,75 @@
+---
+title: "Drawbridge — Technology stack"
+---
+mindmap
+  root((Drawbridge))
+    Gemini Enterprise Agent Platform
+      Agent Runtime on Vertex AI Agent Engine
+      Memory Bank for vendor dossiers
+      Agent Gateway policy chokepoint
+      Agent Registry publication v1.2
+      Model Armor content screening
+    Models
+      Gemini 3.5 Flash default
+        Reply parsing
+        Control extraction
+        Data scope classification for re-tiering
+        Chase messages
+      Gemini 3.7 Flash exactly two places
+        Cross-examination
+        CISO risk memo
+      gemini-embedding-001 for evidence retrieval
+      Gemma 3 in-VPC
+        PII scrubbing after screening
+        Data sovereignty story
+    Agent framework
+      ADK 2 graph workflows
+      Structure known before the input arrives
+      Six identities one per agent plus screening
+      Pydantic typed contracts
+      Shared kernel of six modules
+    Google Cloud infrastructure
+      Cloud Run
+        Vendor portal
+        Internal dashboard
+        Inbox simulator
+        Binder service
+      Pub/Sub with dead letter topics
+      Firestore native mode ledger
+        KNN vector index for evidence chunks
+      Cloud Storage three buckets
+        Quarantine with a seven day lifecycle rule
+        Clean and stamped
+        Binders
+      Secret Manager private approval signing key
+      Artifact Registry and Cloud Build
+      Cloud Scheduler for sweeps
+    Observability
+      OpenTelemetry spans
+      Cloud Trace waterfall
+      Cloud Logging policy blocks
+      Per review cost meter
+    Security and governance
+      Six least privilege service accounts at collection level
+      Policy P1 human approved first contact
+      Policy P2 verdict bearing stamp required
+      Policy P3 outbound fetch allowlist
+      Asymmetric approval tokens the gateway cannot mint
+      Model Armor two templates five detection families
+      Fail closed on a skipped detector
+      Twelve variant injection corpus with a published detection rate
+      IAM boundary tests that must fail
+    Frontend
+      Next.js 14 and TypeScript
+      Tailwind CSS
+      Time compression demo clock
+      Skeleton loaders and real empty states
+    Engineering discipline
+      Plan versioned idempotency keys derived from workflow position
+      Checkpointed resumable steps
+      Defined behaviour for late and out of order events
+      State machine that refuses to guess
+      Bounded self improvement phrasing only never scoring
+      Enforced cost ceiling not an observed one
+      Tests carrying the architectural claim
+      Synthetic vendor pack and injection corpus shipped in repo

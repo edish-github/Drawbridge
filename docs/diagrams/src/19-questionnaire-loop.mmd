@@ -1,0 +1,38 @@
+---
+title: "Drawbridge — The questionnaire loop: replies arrive in fragments, over days"
+---
+flowchart TB
+  GEN["<b>Generate — select and tailor, never invent</b><br/>a curated bank.yaml organised by rubric domain<br/>Tier 1 ≈ 60 · Tier 2 ≈ 30 · Tier 3 ≈ 12, plus AI-specific questions when is_ai_vendor<br/><br/><b>Style rule</b> — no yes/no questions. <i>Do you encrypt data?</i> becomes <i>list encryption<br/>standards at rest and in transit and attach your key-management policy.</i><br/>Specificity is what makes the later contradiction detection possible at all"]
+  SEND["<b>Send through the gateway</b> — human gate G2, enforced by policy P1:<br/>a token is required for a new contact. The body is screened through<br/>drawbridge-output before it leaves, so an outbound message cannot carry<br/>internal notes or another vendor's details<br/>idempotency key <code>review_id : plan_vN : questionnaire_send : v1</code>"]
+  WAIT{"<b>A message arrives</b><br/>days later, partial"}
+  SCREEN["<b>Screen the reply body first</b><br/>an injection can arrive in an email just as easily as in a PDF —<br/>demonstrating that you understood this is a differentiator"]
+  PARSE["<b>Parse this message alone</b> · Flash<br/>merge into qa_responses keyed by question_id,<br/>recording confidence and source_msg for the binder's parse provenance"]
+  CONF{"<b>Confidence above<br/>the threshold?</b>"}
+  QUEUE["<b>Quote it back to the analyst queue</b> · needs_human<br/>an unparseable answer is never silently dropped"]
+  FOLLOW["<b>(Target) One targeted follow-up</b><br/>quote their vague answer back, name the exact evidence required,<br/>ask once. Capped at two per question so politeness cannot loop.<br/>This is the difference between an agent that collects<br/>and an agent that interrogates"]
+  RETIER["<b>reassess_tier after each reply batch</b><br/>if an answer reveals broader data access than intake declared,<br/>the review re-tiers UP, plan_version increments, and the extra<br/>domain's questions are generated"]
+  COV{"<b>Coverage ≥ 90 percent?</b>"}
+  CAP{"<b>Third chase<br/>already sent?</b>"}
+  CHASE["<b>Schedule the next chase</b> — three days out, its own idempotency key<br/>reminder → deadline notice → escalation to the analyst"]
+  HUMAN["<b>NEEDS_HUMAN</b><br/>three rounds without a reply is<br/>an analyst's problem, not a loop"]
+  DONE["<b>publish review.findings_ready</b><br/>the Evidence agent takes over"]
+
+  GEN --> SEND --> WAIT --> SCREEN --> PARSE --> CONF
+  CONF -- "no" --> QUEUE --> COV
+  CONF -- "no, but parseable" --> FOLLOW -.-> WAIT
+  CONF -- "yes" --> RETIER --> COV
+  COV -- "yes" --> DONE
+  COV -- "no" --> CAP
+  CAP -- "no" --> CHASE
+  CAP -- "yes" --> HUMAN
+  CHASE -. "wait" .-> WAIT
+
+  classDef rule fill:#fef3c7,stroke:#b45309,stroke-width:2px,color:#78350f
+  classDef act fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a
+  classDef ok fill:#dcfce7,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef bad fill:#fee2e2,stroke:#b91c1c,stroke-width:2px,color:#7f1d1d
+  class GEN rule
+  class SEND,WAIT,SCREEN,PARSE,CONF,COV,CAP,CHASE act
+  class DONE ok
+  class FOLLOW,RETIER rule
+  class QUEUE,HUMAN bad

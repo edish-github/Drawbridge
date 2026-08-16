@@ -1,0 +1,58 @@
+---
+title: "Drawbridge — The Audit Binder: observability turned into the deliverable"
+---
+flowchart LR
+  subgraph SRC["SOURCES — already produced by the act of running the review"]
+    direction TB
+    S1["<b>Event ledger</b><br/>Firestore, ordered and immutable"]
+    S2["<b>OTel span tree</b><br/>goal · decision · model · latency · cost"]
+    S3["<b>Screening records</b><br/>per-filter verdicts, the template id and version<br/>that produced them, and inert excerpts"]
+    S4["<b>Findings</b><br/>with their source passages, retrieval provenance<br/>and a rule-or-model label on each one"]
+    S5["<b>Approvals</b><br/>identity and timestamp"]
+    S6["<b>Watchdog log</b><br/>post-approval monitoring"]
+  end
+
+  GEN["<b>Binder generator</b> · Cloud Run<br/>HTML with a print stylesheet,<br/>converted to PDF<br/><br/><b>rendered by a template, never by a model</b><br/>renders in under three seconds on screen"]
+
+  subgraph OUT["THE EXPORT — a cover and eight sections"]
+    direction TB
+    O0["<b>Cover</b> — vendor, review id, tier,<br/>dates, outcome, approver identity"]
+    O1["<b>1</b> · Review timeline, every event"]
+    O2["<b>2</b> · Questionnaire answers with parse provenance"]
+    O3["<b>3</b> · Evidence inventory with screening results,<br/>each naming the template id and version"]
+    O4["<b>4</b> · Findings and contradictions with sources<br/>and retrieval provenance — chunk id and page —<br/>every finding labelled <i>rule</i> or <i>model</i>"]
+    O5["<b>5</b> · Score computation against the rubric,<br/>as arithmetic out of 100 a human can re-do"]
+    O6["<b>6</b> · Human decisions, identity and timestamp"]
+    O7["<b>7</b> · Full reasoning-trace appendix"]
+    O8["<b>8</b> · Post-approval monitoring log"]
+  end
+
+  MAP["<b>Compliance mapping, printed on the cover</b><br/>SOC 2 CC9.2 · ISO 27001 A.5.19 to A.5.23<br/>DORA ICT third-party register<br/>NIS2 Article 21 2 d supply chain<br/><br/>one line that reframes the artefact from<br/><i>logs</i> to <i>the thing your auditor asks for</i>"]
+
+  S1 --> GEN
+  S2 --> GEN
+  S3 --> GEN
+  S4 --> GEN
+  S5 --> GEN
+  S6 --> GEN
+  GEN --> O0
+  GEN --> O1
+  GEN --> O2
+  GEN --> O3
+  GEN --> O4
+  GEN --> O5
+  GEN --> O6
+  GEN --> O7
+  GEN --> O8
+  O0 --> MAP
+  TPL["<b>Why it is templated</b><br/>a model-written binder could be steered by the very payload<br/>the binder exists to report. Spans carry refs, hashes and<br/>enumerated verdicts — never raw external content."]
+  GEN -.-> TPL
+
+  classDef src fill:#e2e8f0,stroke:#334155,stroke-width:2px,color:#0f172a
+  classDef gen fill:#dbeafe,stroke:#1d4ed8,stroke-width:2.5px,color:#1e3a8a
+  classDef out fill:#dcfce7,stroke:#15803d,stroke-width:1.5px,color:#14532d
+  classDef map fill:#f3e8ff,stroke:#7e22ce,stroke-width:2px,color:#581c87
+  class S1,S2,S3,S4,S5,S6 src
+  class GEN gen
+  class O0,O1,O2,O3,O4,O5,O6,O7,O8 out
+  class MAP,TPL map

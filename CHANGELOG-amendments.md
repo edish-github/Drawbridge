@@ -3,8 +3,36 @@
 Where the code and the planning documents in `research/` disagree, and which one is right.
 
 `research/` is read-only and stays that way. This file is the record of drift, so a reader
-coming from the handbook knows which claims survived contact with an implementation. Diagrams
-are regenerated in Phase 3; they are not edited here.
+coming from the handbook knows which claims survived contact with an implementation.
+
+**Read [`docs/architecture.md`](docs/architecture.md) for the current system.** Every amendment
+below that changed the design is folded into that document as ordinary description rather than
+as a correction, because a reader arriving at the docs should see what the thing is, not the
+original plan plus a list of edits. This file is the audit trail behind it: what moved, and why.
+The diagram set in [`docs/diagrams/`](docs/diagrams/README.md) has been regenerated against the
+same amendments, and its README records which nodes were deleted for describing something that
+was never built.
+
+| | Amendment | In the architecture doc |
+|---|---|---|
+| A01 | `index_chunks` belongs to the Evidence agent | Four memory layers |
+| A03 | Cost ceiling is $1.00 | — measured, not structural |
+| A04 | Embeddings are 3072-dimensional | Four memory layers |
+| A05 | The planned model ids return 404 | Nothing reaches a model except through one function |
+| A06 | Anything can park a review; only the Orchestrator advances one | Who may move a review |
+| A08 | No contradiction multiplier | Scoring |
+| A09 | Scored over the plan's domain set | Scoring |
+| A10 | P1 gates first contact, not every message | [Security](docs/security.md) — three policies |
+| A11 | P2 is enforced in the router | Nothing reaches a model except through one function |
+| A12 | Chases and follow-ups are composed from the bank | [Security](docs/security.md) — what the model never decides |
+| A13 | A crashed effect is confirmed, never released | Exactly-once effects |
+| A14 | The Watchdog screens what it fetches | [Security](docs/security.md) — three policies |
+| A15 | Conditions live in the ledger, not durable memory | Four memory layers |
+| A16 | A second review carries a domain, not a question | The second review |
+| A17 | `date_source` attributes the input a date finding turns on | Scoring — what a provenance label claims |
+
+A02 and A07 are facts about the fixtures and the free tier rather than about the design, and
+they live in [`docs/getting-started.md`](docs/getting-started.md).
 
 ---
 
@@ -213,6 +241,25 @@ is a rubber stamp rather than a review. The domain gate is what makes it a savin
 shortcut: the finding is the reason the review happened, and asking around it would be the worst
 possible economy. Measured: 43 asked instead of 54, and the eleven carried are the only domain
 that came back clean.
+
+## A17 · A rule finding attributes the date it turns on, separately from its conclusion
+
+**Documents affected:** anywhere `source="rule"` is presented as the whole of a finding's
+provenance.
+
+**What the code does:** `Finding.date_source` carries `extracted`, `declared` or `computed` on
+any finding that turns on a date, alongside `source`. A certificate expiry is `rule` and
+`extracted`; a register review worked out to have lapsed is `rule` and `computed`; the same
+register row with a hand-set status flag is `rule` and `declared`. Findings that turn on no date
+carry nothing. The binder prints both labels side by side and explains the difference.
+
+**Why:** `rule` describes the *conclusion* — a comparison the code performed — and says nothing
+about the input. On a date comparison the input is usually a date a model read off a page, so a
+single label read as a stronger claim than the evidence supported, and it read that way in the
+binder, in front of an auditor. The arithmetic is still the code's; only the attribution changed.
+The distinction between computed and declared is the one an auditor actually asks for: *did we
+work this out, or did somebody mark it?* — and a hand-set flag is only as current as the last
+person who touched it.
 
 ## A06 · Review-state ownership is narrowed to forward transitions
 

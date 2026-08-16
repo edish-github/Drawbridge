@@ -1,0 +1,48 @@
+---
+title: "Drawbridge — Kill and resume: why a resumable agent never emails twice"
+---
+sequenceDiagram
+  autonumber
+  participant W as Agent Runtime worker
+  participant CP as Checkpoint · Firestore
+  participant ID as Idempotency ledger
+  participant GW as Agent Gateway
+  actor V as Vendor inbox
+  participant D as Dashboard
+
+  rect rgb(220, 252, 231)
+  Note over W,ID: Normal execution — claim before effect, never after
+  W->>CP: step plan started
+  CP-->>W: not completed, proceed
+  W->>CP: record completed_steps plan with result
+  W->>ID: transactional claim on review_42 questionnaire_send v1
+  ID-->>W: claimed, status in_progress
+  W->>GW: send_email with approval token
+  GW->>V: questionnaire delivered
+  W->>ID: mark done with recorded result
+  end
+
+  rect rgb(254, 226, 226)
+  Note over W,D: SIGKILL — the runtime dies mid-review, live on camera
+  W-XW: process terminated during evidence_review
+  D->>D: review card shows parked, current_step evidence_review
+  end
+
+  rect rgb(219, 234, 254)
+  Note over W,V: Restart — recovery is structural, not special-cased
+  W->>CP: replay the plan, list completed steps
+  CP-->>W: plan, questionnaire_send, replies_parsed already done
+  W->>ID: check review_42 questionnaire_send v1
+  ID-->>W: already done, returning recorded result
+  Note right of ID: idem_key is derived from review id and workflow position,<br/>never a timestamp or uuid — otherwise the guard is worthless
+  W--xV: no second email is sent
+  W->>W: resume at evidence_review, the first incomplete step
+  W->>D: review continues to SCORED and GATED
+  end
+
+  rect rgb(255, 237, 213)
+  Note over W,D: The conservative case — a crash between claim and effect
+  W->>ID: found an in_progress record older than the timeout
+  ID-->>D: surface for reconciliation, do not blind-resend
+  D->>D: NEEDS_HUMAN card — a security product should never guess
+  end

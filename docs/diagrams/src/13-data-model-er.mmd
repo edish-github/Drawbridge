@@ -1,0 +1,169 @@
+---
+title: "Drawbridge — Firestore data model"
+---
+erDiagram
+  VENDOR ||--o{ REVIEW : "is reviewed by"
+  VENDOR ||--o| DOSSIER : "remembered as"
+  VENDOR ||--o{ WATCHDOG_TASK : "monitored by"
+  REVIEW ||--o{ EVENT : records
+  REVIEW ||--o{ QA_RESPONSE : collects
+  REVIEW ||--o{ SCREENING : screens
+  REVIEW ||--o{ FINDING : produces
+  REVIEW ||--|| SCORE : yields
+  REVIEW ||--o| APPROVAL : "gated by"
+  REVIEW ||--o{ IDEMPOTENCY_KEY : guards
+  REVIEW ||--o{ SPAN : traces
+  REVIEW ||--o| BINDER : exports
+  REVIEW ||--o| REVIEW : "reopened as"
+  REVIEW ||--o{ TIER_CHANGE : "re-tiered by"
+  SCREENING ||--o{ EVIDENCE_CHUNK : indexes
+  SCREENING ||--o| FINDING : "may raise conduct"
+  FINDING }o--|| EVIDENCE_CHUNK : cites
+  VENDOR ||--o{ SUBPROCESSOR : declares
+
+  VENDOR {
+    string vendor_id PK
+    string name
+    string category
+    boolean is_ai_vendor "auto-adds the AI domain"
+    int tier "1 critical, 2 internal, 3 light"
+    boolean adversarial_flag "carried into every future review"
+    string status
+  }
+  REVIEW {
+    string review_id PK
+    string vendor_id FK
+    string state "INTAKE to MONITORED or NEEDS_HUMAN"
+    string gate_scope "contact or decision — which gate GATED is parked at"
+    int plan_version "incremented on every re-plan; part of every idem_key"
+    string current_step
+    array completed_steps "resume replays and skips these"
+    map step_results
+    int score "the Trust Score, 0 to 100, higher is safer"
+    string band
+    float cost_usd "accumulated model spend"
+    datetime opened_at
+    datetime decided_at
+    string reopened_from FK "history is never mutated"
+  }
+  EVENT {
+    string event_id PK
+    string type "the topic name"
+    string idem_key
+    string trace_id "ties the event to its span tree"
+    string source
+    datetime ts
+    map payload
+  }
+  QA_RESPONSE {
+    string question_id PK
+    string domain
+    text answer
+    float confidence "below threshold sets needs_human"
+    string source_msg "parse provenance for the binder"
+  }
+  SCREENING {
+    string screening_id PK
+    string object_ref
+    boolean clean
+    string template "drawbridge-untrusted or drawbridge-output"
+    string template_version "recorded so a reviewer knows which policy screened it"
+    map filter_verdicts "pi, sdp, uri, rai — per-filter match state"
+    boolean sanitised "a sanitised document is one that tried something"
+    text matched_excerpt "inert evidence, never re-prompted"
+    string clean_stamp "signed claim carrying the verdict, not just presence"
+    datetime ts
+  }
+  EVIDENCE_CHUNK {
+    string chunk_id PK
+    string review_id FK
+    string doc_ref
+    int page
+    text text
+    vector embedding "Firestore KNN index, pre-filtered by review_id"
+  }
+  TIER_CHANGE {
+    string change_id PK
+    int from_tier
+    int to_tier "tier only ever moves up"
+    text reason "the vendor answer that caused it, in plain English"
+    string source_ref
+    datetime at
+  }
+  SUBPROCESSOR {
+    string subprocessor_id PK
+    string vendor_id FK
+    string name
+    string purpose
+    boolean processes_customer_data
+    boolean known_to_org "set-difference against the approved-vendor register"
+    string prior_review_id FK
+  }
+  FINDING {
+    string finding_id PK
+    string domain
+    string severity "low, medium, high — assigned by the Evidence agent"
+    string source "rule or model — provenance, printed in the binder"
+    boolean contradiction "needs a claim AND a contradicting passage"
+    text summary
+    string evidence_ref "resolves to an EVIDENCE_CHUNK where retrieval was used"
+    string claim_ref
+    string trace_ref
+  }
+  SCORE {
+    int raw "0 to 100"
+    map breakdown "per domain arithmetic, shown in the binder"
+    boolean adversarial_conduct
+    int adversarial_penalty "minus 25 trust points"
+    string band
+  }
+  APPROVAL {
+    string approval_id PK
+    string identity "named human, never an agent"
+    string decision "approve, conditional, reject"
+    text conditions
+    string jti "single-use token id"
+    datetime ts
+  }
+  IDEMPOTENCY_KEY {
+    string idem_key PK "review_id, plan_vN and step_id"
+    string status "in_progress or done"
+    string source
+    map result
+    datetime done_ts "TTL — a spent key is an artefact, not history"
+  }
+  SPAN {
+    string span_id PK
+    string agent
+    text goal "plain English, so the binder reads like prose"
+    text decision
+    string model
+    int tokens
+    float cost_usd
+    int latency_ms
+  }
+  DOSSIER {
+    string vendor_id PK
+    array prior_reviews
+    array negotiated_exceptions
+    array policy_notes
+    array question_notes "question_effectiveness — phrasing only, never scoring"
+    string note_provenance "human, rule or model_structured — never raw vendor text"
+    string supersedes "notes replace rather than accumulate"
+    string contact_persona
+  }
+  WATCHDOG_TASK {
+    string task_id PK
+    string signal
+    string signal_id "watchdog.hit deduplicates on this"
+    float confidence "below WATCHDOG_CONFIDENCE_MIN goes to triage, not a review"
+    string source_feed "must be on the P3 allowlist"
+    datetime detected_at
+    string opened_review FK
+  }
+  BINDER {
+    string binder_id PK
+    string storage_ref
+    array frameworks "SOC 2, ISO 27001, DORA"
+    datetime generated_at
+  }

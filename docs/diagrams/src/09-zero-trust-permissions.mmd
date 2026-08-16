@@ -1,0 +1,61 @@
+---
+title: "Drawbridge — Zero-trust fleet identity: the permission matrix is a deliverable, not config"
+---
+flowchart LR
+  subgraph FLEET["TEN IDENTITIES, STATED AT COLLECTION LEVEL — no shared credential exists anywhere in the fleet"]
+    direction TB
+    SA1["<b>sa-orchestrator</b>"]
+    SA2["<b>sa-questionnaire</b>"]
+    SA3["<b>sa-evidence</b>"]
+    SA4["<b>sa-scorer</b>"]
+    SA5["<b>sa-watchdog</b>"]
+    SA6["<b>sa-armor</b><br/>the screening pipeline"]
+  end
+
+  G1["Firestore state read and write<br/>Pub/Sub publish and subscribe<br/>Vertex AI user"]
+  G2["<b>qa_responses</b> read and write<br/>portal write · Pub/Sub · Vertex AI user<br/>email send <i>via gateway only</i>"]
+  G3["Clean bucket, <b>read only</b><br/><b>evidence_chunks</b> read and write — <i>chunking and embedding<br/>live here, not in screening</i><br/><b>findings</b> · <b>subprocessors</b> write<br/><b>approved_vendors</b> read · Vertex AI user"]
+  G4["Firestore read · <b>scores</b> write<br/>Vertex AI user"]
+  G5["Pub/Sub publish<br/>outbound fetch <i>via the P3 allowlist</i><br/>re-review task write"]
+  G6["Quarantine read · clean write<br/><b>screenings</b> write<br/>modelarmor.user"]
+
+  D1["email send · Storage read<br/>approval write"]
+  D2["<b>findings</b> · <b>scores</b> · <b>approvals</b> write<br/>Storage read"]
+  D3["<b>any</b> network egress · email<br/>quarantine bucket"]
+  D4["external calls<br/>approvals write"]
+  D5["approvals · email<br/>vendor data write"]
+  D6["<b>any</b> generative model call<br/>email · findings write"]
+
+  SA1 --> G1
+  SA2 --> G2
+  SA3 --> G3
+  SA4 --> G4
+  SA5 --> G5
+  SA6 --> G6
+  SA1 -. "never granted" .-> D1
+  SA2 -. "never granted" .-> D2
+  SA3 -. "never granted" .-> D3
+  SA4 -. "never granted" .-> D4
+  SA5 -. "never granted" .-> D5
+  SA6 -. "never granted" .-> D6
+
+  SVC["<b>Plus four service identities</b> — sa-portal, sa-dashboard, sa-approvals, sa-binder.<br/>sa-approvals is the only holder of the private signing key. The gateway holds<br/>the public half and is structurally incapable of minting a token."]
+  COLL["<b>Why the rows name collections, not services</b><br/>a row that says <i>Firestore</i> cannot express the difference between the<br/>qa_responses the Questionnaire agent must write and the findings it must never touch.<br/>Vague permission rows are how least-privilege claims quietly become false."]
+  TEST["<b>tests/test_iam_boundaries.py — 230 rows</b><br/>every identity against every collection, evaluated by the emulator<br/>against rules GENERATED from this matrix, so the two cannot drift.<br/>44 permitted writes and 186 real PermissionDenied errors.<br/><br/><b>What it cannot prove</b> — that sa-evidence is genuinely the principal.<br/>That is a revision bound to a service account, and those rows stay<br/>skipped with that as their stated reason."]
+  WHY["<b>Why it is load-bearing</b><br/>a fleet holding one god-credential is a single injection away<br/>from disaster. Least privilege is what makes the screening story<br/>true end to end — the agent that reads evidence cannot email,<br/>and the agent that emails cannot touch internal data."]
+
+  FLEET -.-> SVC
+  FLEET -.-> COLL
+  D3 --> TEST
+  TEST -.-> WHY
+
+  classDef sa fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a
+  classDef cap fill:#dcfce7,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef den fill:#fee2e2,stroke:#b91c1c,stroke-width:2px,color:#7f1d1d
+  classDef note fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
+  classDef test fill:#fef3c7,stroke:#b45309,stroke-width:2px,color:#78350f
+  class SA1,SA2,SA3,SA4,SA5,SA6 sa
+  class G1,G2,G3,G4,G5,G6 cap
+  class D1,D2,D3,D4,D5,D6 den
+  class SVC,WHY,COLL note
+  class TEST test

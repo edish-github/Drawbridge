@@ -1,0 +1,38 @@
+---
+title: "Drawbridge — The fleet on one page"
+---
+flowchart TB
+  INTAKE["<b>Intake</b><br/>Marcus submits a vendor<br/>name · data scope · spend"]
+  ORC["<b>Orchestrator</b><br/>tiers the vendor, plans the review,<br/>owns the state, refuses to guess"]
+  QA["<b>Questionnaire</b><br/>generates a tier-appropriate set, sends,<br/>parses replies over days, chases politely"]
+  GATE1["<b>G2 · first outbound contact</b><br/>a human approves — and policy P1<br/>at the gateway is what makes it unskippable"]
+  VENDOR["<b>Vendor</b><br/>answers · uploads<br/>occasionally adversarial"]
+  ARMOR{"<b>Model Armor</b><br/>screens everything<br/>the vendor sends"}
+  FLAG["<b>Adversarial Conduct</b><br/>a manipulation attempt becomes<br/>a risk signal, not just a block"]
+  EV["<b>Evidence</b><br/>reads the SOC 2 and certificates,<br/>cross-examines them against the answers"]
+  RS["<b>Risk Scorer</b><br/>deterministic rubric arithmetic,<br/>one Pro-written memo for the CISO"]
+  GATE2["<b>G1 gate</b><br/>the CISO accepts<br/>the risk, by name"]
+  WD["<b>Watchdog</b><br/>sweeps the approved portfolio,<br/>reopens a review on a signal"]
+  BINDER["<b>Audit Binder</b><br/>reasoning traces exported as the<br/>evidence pack an auditor asks for"]
+
+  INTAKE --> ORC --> QA --> GATE1 --> VENDOR
+  VENDOR -- "replies and documents" --> ARMOR
+  ARMOR -- "clean and stamped" --> EV
+  ARMOR -- "hidden instructions found" --> FLAG
+  EV -- "findings and contradictions" --> RS
+  FLAG == "−25 and forced escalation" ==> RS
+  RS -- "score · band · memo" --> GATE2
+  GATE2 -- "decision recorded with identity" --> WD
+  GATE2 --> BINDER
+  WD -. "watchdog.hit opens a new linked review" .-> ORC
+
+  classDef agent fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a
+  classDef armor fill:#fef3c7,stroke:#b45309,stroke-width:2px,color:#78350f
+  classDef danger fill:#fee2e2,stroke:#b91c1c,stroke-width:2.5px,color:#7f1d1d
+  classDef human fill:#ffedd5,stroke:#c2410c,stroke-width:2px,color:#7c2d12
+  classDef gov fill:#e2e8f0,stroke:#334155,stroke-width:2px,color:#0f172a
+  class ORC,QA,EV,RS,WD agent
+  class ARMOR armor
+  class FLAG,VENDOR danger
+  class GATE1,GATE2 human
+  class BINDER,INTAKE gov

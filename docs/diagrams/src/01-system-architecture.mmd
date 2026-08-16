@@ -1,0 +1,128 @@
+---
+title: "Drawbridge — System Architecture: trust zones, the fleet, and the governance plane"
+---
+flowchart TB
+
+  subgraph Z1["① UNTRUSTED ZONE · every byte here was authored by the party being judged"]
+    direction LR
+    VC["<b>Vendor contact</b><br/>NimbusWrite AI · Tier 1 · AI SaaS"]
+    MAILBOX["<b>Vendor Inbox</b> · Cloud Run<br/>simulated mail channel<br/>SMTP-adapter compatible"]
+  end
+
+  subgraph Z2["② INGRESS SCREENING · a platform-owned pipeline; no agent has a code path into quarantine"]
+    direction LR
+    QB[("<b>evidence-quarantine</b><br/>Cloud Storage · raw bytes<br/>7-day lifecycle rule")]
+    EXT["<b>Local extraction</b><br/>text pulled without<br/>model contact"]
+    ARMOR{"<b>Model Armor</b><br/>five filters · two templates<br/>fail-closed on a skipped detector"}
+    CB[("<b>evidence-clean</b><br/>signed verdict-bearing stamp<br/>template · version · per-filter verdicts")]
+    INERT[("<b>Inert excerpt</b><br/>blocked payload kept as<br/>evidence · never re-prompted")]
+  end
+
+  subgraph Z3["③ EVENT BACKBONE · Pub/Sub · at-least-once, unordered · DLQ after 5 attempts → NEEDS_HUMAN"]
+    direction LR
+    TOPICS["review.intake · review.plan_ready · review.chase_due · vendor.reply_received<br/>vendor.evidence_uploaded · evidence.screened · review.findings_ready · review.score_ready<br/>review.approved · review.rescore · watchdog.sweep · watchdog.hit"]
+  end
+
+  subgraph Z4["④ AGENT RUNTIME · Vertex AI Agent Engine · ADK 2 graph workflow · one service-account identity per agent"]
+    direction LR
+    ORC["<b>Orchestrator</b><br/>sa-orchestrator<br/>tier · plan · re-tier · dispatch · gate"]
+    QA["<b>Questionnaire</b><br/>sa-questionnaire<br/>generate · send · parse · chase"]
+    EV["<b>Evidence</b><br/>sa-evidence<br/>extract · retrieve · cross-examine"]
+    RS["<b>Risk Scorer</b><br/>sa-scorer<br/>rubric arithmetic · memo"]
+    WD["<b>Watchdog</b><br/>sa-watchdog<br/>scheduled post-approval sweeps"]
+  end
+
+  subgraph Z5["⑤ TOOL &amp; MODEL PLANE · P1 and P3 at the gateway, P2 in the router — the only place every model call passes"]
+    direction LR
+    P1{{"<b>P1</b> · no outbound email to a new contact<br/>without a signed human approval token<br/>verified with a public key it cannot sign with"}}
+    P2{{"<b>P2</b> · no external content reaches a model<br/>without a verified, verdict-bearing clean-stamp"}}
+    P3{{"<b>P3</b> · no outbound fetch outside<br/>the feed allowlist"}}
+    FLASH["<b>Gemini 3.5 Flash</b> · default<br/>parse · extract · classify"]
+    PRO["<b>Gemini 3.7 Flash</b> · exactly two places<br/>cross-examination · risk memo"]
+    EMB["<b>gemini-embedding-001</b> · 3072-dim<br/>evidence chunks · called by the Evidence agent,<br/>never by the screening identity"]
+    OUTSCREEN["<b>Output screening</b><br/>drawbridge-output template<br/>memo and outbound mail checked<br/>before a human acts on them"]
+  end
+
+  subgraph Z6["⑥ STATE &amp; MEMORY · four layers, four jobs"]
+    direction LR
+    L1["<b>L1 · Session state</b><br/>Agent Engine<br/>in-flight reasoning"]
+    L2[("<b>L2 · Firestore ledger</b><br/>reviews · findings · events<br/>checkpoints · idempotency keys")]
+    L25[("<b>L2.5 · Semantic retrieval</b><br/>Firestore KNN over screened evidence<br/>which passage says this?")]
+    L3[("<b>L3 · Memory Bank</b><br/>vendor dossiers · policy memory<br/>structured notes only · provenance-tagged")]
+  end
+
+  subgraph Z7["⑦ HUMAN GATES · signed, single-use, scoped tokens — enforced at the gateway, never in the UI"]
+    direction LR
+    DASH["<b>Internal Dashboard</b> · Cloud Run<br/>queue · review timeline · gate card<br/>read-only: no signing key, no write path"]
+    G1["<b>G1 · Risk acceptance</b><br/>Elena, CISO"]
+    G2["<b>G2 · First outbound contact</b><br/>Priya, Security Analyst<br/>the human act that P1 makes unskippable"]
+  end
+
+  subgraph Z8["⑧ GOVERNANCE &amp; OBSERVABILITY · the audit trail is the deliverable"]
+    direction LR
+    OTEL["<b>Cloud Trace / Logging</b><br/>OTel span per step: goal · decision · model · latency · cost<br/>refs, hashes and verdicts only — never raw external content"]
+    BINDER["<b>Audit Binder</b> · Cloud Run<br/>8 sections → binders bucket · template-rendered, never model-written<br/>SOC 2 CC9.2 · ISO 27001 A.5.19–5.23 · DORA"]
+    IAM["<b>IAM</b> · 10 least-privilege identities<br/>collection-level rows generated into Firestore rules<br/>230 rows asserted against a running emulator"]
+  end
+
+  VC --> MAILBOX
+  MAILBOX -- "evidence uploads and reply bodies alike" --> QB
+  QB --> EXT
+  EXT -- "screen FIRST, on real text" --> ARMOR
+  ARMOR -- "clean or sanitised" --> CB
+  ARMOR -- "threat found · blocked" --> INERT
+  CB -- "chunk · embed · index — only stamped content" --> L25
+  CB -- "evidence.screened" --> TOPICS
+  INERT == "ADVERSARIAL CONDUCT · −25 trust points · forced escalation" ==> TOPICS
+
+  TOPICS --> ORC
+  TOPICS --> QA
+  TOPICS --> EV
+  TOPICS --> RS
+  TOPICS --> WD
+
+  QA --> P1
+  EV --> P2
+  RS --> P2
+  WD --> P3
+  P2 --> FLASH
+  P2 --> PRO
+  EV --> EMB
+  L25 -- "top-k passages per claim" --> PRO
+  PRO --> OUTSCREEN
+  OUTSCREEN --> DASH
+  ORC --> L1
+  ORC --> L2
+  ORC --> L3
+
+  L2 --> DASH
+  DASH --> G1
+  DASH --> G2
+  L2 --> OTEL
+  L2 --> BINDER
+  OTEL --> BINDER
+
+  P1 -. "authorised send · exactly-once" .-> MAILBOX
+  G1 -. "no DECIDED state without a named human" .-> ORC
+
+  classDef untrusted fill:#fee2e2,stroke:#b91c1c,stroke-width:2px,color:#7f1d1d
+  classDef screen fill:#fef3c7,stroke:#b45309,stroke-width:2px,color:#78350f
+  classDef bus fill:#e0f2fe,stroke:#0369a1,stroke-width:2px,color:#0c4a6e
+  classDef agent fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a
+  classDef gateway fill:#ede9fe,stroke:#6d28d9,stroke-width:2px,color:#4c1d95
+  classDef model fill:#f3e8ff,stroke:#7e22ce,stroke-width:2px,color:#581c87
+  classDef state fill:#dcfce7,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef human fill:#ffedd5,stroke:#c2410c,stroke-width:2px,color:#7c2d12
+  classDef gov fill:#e2e8f0,stroke:#334155,stroke-width:2px,color:#0f172a
+
+  class VC,MAILBOX untrusted
+  class QB,EXT,ARMOR,CB,INERT screen
+  class TOPICS bus
+  class ORC,QA,EV,RS,WD agent
+  class P1,P2,P3,OUTSCREEN gateway
+  class FLASH,PRO,EMB model
+  class L1,L2,L25,L3 state
+  class DASH,G1,G2 human
+  class OTEL,BINDER,IAM gov
+
+  linkStyle 5 stroke:#b91c1c,stroke-width:3px,color:#b91c1c

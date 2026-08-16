@@ -1,0 +1,48 @@
+---
+title: "Drawbridge — Memory hierarchy: four layers, four jobs"
+---
+flowchart TB
+  L1["<b>L1 · SESSION STATE</b> — Agent Engine<br/>─────────────────────────<br/>in-flight reasoning for a single agent turn<br/>tool-call scratchpad, partial parses<br/><br/><b>Lifetime</b> — the turn<br/><b>Answers</b> — what am I doing right now?"]
+
+  L2["<b>L2 · DURABLE LEDGER</b> — Firestore<br/>─────────────────────────<br/>reviews · completed_steps · step_results · events<br/>findings · qa_responses · screenings · approvals<br/>idempotency keys · score breakdowns<br/><br/><b>Lifetime</b> — forever, immutable<br/><b>Answers</b> — what happened, exactly?"]
+
+  L25["<b>L2.5 · SEMANTIC RETRIEVAL</b> — Firestore KNN<br/>─────────────────────────<br/>screened documents chunked, embedded with<br/>gemini-embedding-001, indexed and pre-filtered by review_id<br/>only clean-stamped content is ever indexed<br/><br/><b>Lifetime</b> — the review<br/><b>Answers</b> — which passage says this?"]
+
+  CROSSEX["<b>Cross-examination</b><br/>a Tier-1 SOC 2 runs 60–100 pages;<br/>the finding cites the chunk it came from<br/>rather than a quotation it hopes it got right"]
+
+  DISTILL{"<b>Distillation, at review close</b><br/>and at notable events only<br/><br/>write what changes a future decision —<br/>outcome, negotiated exceptions,<br/>conduct flags, contact changes"}
+
+  STRUCT{"<b>Structure, not prose</b><br/>enumerated note types · controlled vocabulary<br/>provenance ∈ human | rule | model_structured<br/><br/>never free text derived from vendor content<br/>notes supersede rather than accumulate"}
+
+  L3["<b>L3 · VENDOR MEMORY</b> — Memory Bank<br/>─────────────────────────<br/>vendor dossier — prior reviews, negotiated exceptions,<br/>contacts, the adversarial conduct flag<br/>org policy memory — we always require SOC 2 Type II<br/>for data processors<br/><br/><b>Lifetime</b> — across reviews and years<br/><b>Answers</b> — what is worth knowing next time?"]
+
+  DUMP["<b>The anti-pattern</b><br/>dumping the whole review transcript into memory<br/>turns L3 into a slower, dumber L2"]
+
+  POISON["<b>The threat this guard exists for</b><br/>L3 is written from vendor-derived material and recalled<br/>at the START of every future review, before any screening.<br/>An unscreened write is a durable compromise."]
+
+  RECALL["<b>The payoff, on review two</b><br/>months later the fleet opens the second review<br/>with the prior negotiation history already in hand —<br/>and a vendor's adversarial flag still attached"]
+
+  L1 -- "durable write at every checkpoint" --> L2
+  L2 -- "chunk and embed screened documents" --> L25
+  L25 -- "top-k passages per claim" --> CROSSEX
+  L25 -. "index or embedding unavailable → degraded mode,<br/>whole-document fallback; never on the critical path" .-> CROSSEX
+  L2 --> DISTILL
+  DISTILL -- "kept" --> STRUCT
+  STRUCT -- "structured, provenance-tagged" --> L3
+  DISTILL -. "rejected" .-> DUMP
+  STRUCT -. "rejected — raw vendor prose" .-> POISON
+  L3 -- "recalled at intake, before planning" --> RECALL
+  RECALL -. "seeds the next session" .-> L1
+
+  classDef l1 fill:#e0f2fe,stroke:#0369a1,stroke-width:2px,color:#0c4a6e
+  classDef l2 fill:#dcfce7,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef l25 fill:#ccfbf1,stroke:#0f766e,stroke-width:2px,color:#134e4a
+  classDef l3 fill:#f3e8ff,stroke:#7e22ce,stroke-width:2px,color:#581c87
+  classDef rule fill:#fef3c7,stroke:#b45309,stroke-width:2px,color:#78350f
+  classDef bad fill:#fee2e2,stroke:#b91c1c,stroke-width:2px,color:#7f1d1d
+  class L1 l1
+  class L2 l2
+  class L25,CROSSEX l25
+  class L3 l3
+  class DISTILL,STRUCT,RECALL rule
+  class DUMP,POISON bad

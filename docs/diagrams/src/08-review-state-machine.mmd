@@ -1,0 +1,67 @@
+---
+title: "Drawbridge — Review state machine: the system refuses to guess"
+---
+stateDiagram-v2
+  direction TB
+  [*] --> INTAKE
+
+  INTAKE --> QUESTIONNAIRE_OUT : plan checkpointed
+  QUESTIONNAIRE_OUT --> GATED : gate_scope contact · P1 blocks the send without a token
+  GATED --> QUESTIONNAIRE_OUT : contact authorised, single-use token spent
+  QUESTIONNAIRE_OUT --> REPLIES_IN : coverage reaches 90 percent
+  REPLIES_IN --> EVIDENCE_REVIEW : documents screened and stamped
+  EVIDENCE_REVIEW --> SCORED : findings reconciled
+  SCORED --> GATED : gate_scope decision · memo written, waiting on gate G1
+  GATED --> DECIDED : signed approval token, identity recorded
+  DECIDED --> MONITORED : watchdog takes over the vendor
+  MONITORED --> MONITORED : scheduled sweep, no signal
+
+  MONITORED --> EVIDENCE_REVIEW : high-confidence watchdog.hit opens a NEW linked review
+
+  REPLIES_IN --> QUESTIONNAIRE_OUT : re-tier · evidence widens the declared data scope
+  EVIDENCE_REVIEW --> QUESTIONNAIRE_OUT : re-tier · the additional domain's questions go out
+
+  INTAKE --> NEEDS_HUMAN
+  QUESTIONNAIRE_OUT --> NEEDS_HUMAN : three chases, no reply
+  REPLIES_IN --> NEEDS_HUMAN : answer below the confidence threshold
+  EVIDENCE_REVIEW --> NEEDS_HUMAN : corrupt or unreadable document
+  SCORED --> NEEDS_HUMAN : invalid transition, DLQ exhaustion or output screening
+  GATED --> NEEDS_HUMAN : the gate cannot be resolved
+  DECIDED --> NEEDS_HUMAN : an event arrives that a decided review may not absorb
+  MONITORED --> NEEDS_HUMAN : a signal needs triage rather than a re-review
+
+  NEEDS_HUMAN --> [*] : analyst resolves and the review resumes
+
+  note right of GATED
+    One state, two scopes.
+    gate_scope = contact  → human gate G2, first outbound
+                            email, enforced by policy P1
+    gate_scope = decision → human gate G1, risk acceptance
+    Gates are what a person does; policies are what the
+    chokepoint enforces. Both tokens are signed, single-use
+    and scoped, and both are verified at the gateway with a
+    PUBLIC key — never in the user interface, and never with
+    a key the gateway could sign with.
+  end note
+
+  note right of NEEDS_HUMAN
+    Enterable from any state.
+    Parks the review with a dashboard card
+    explaining what stalled and why.
+    It never silently corrects.
+  end note
+
+  note left of MONITORED
+    History is never mutated.
+    A reopened review is a new record
+    linked to the old one, so the
+    audit trail stays intact.
+  end note
+
+  note left of EVIDENCE_REVIEW
+    Re-tiering is the one legitimate backward
+    move inside a single review. Tier only ever
+    goes UP — a downward re-tier is an attack
+    surface. Every change increments plan_version
+    and writes a TierChange naming the evidence.
+  end note

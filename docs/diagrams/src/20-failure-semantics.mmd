@@ -1,0 +1,46 @@
+---
+title: "Drawbridge — Failure semantics: every agent documents what it does when things break"
+---
+flowchart LR
+  F1["<b>Orchestrator</b><br/>any sub-agent failure past the DLQ threshold parks the review<br/>in NEEDS_HUMAN with a card explaining what stalled.<br/>It never invents a missing answer and never approves"]
+  F2["<b>Questionnaire</b><br/>unparseable replies are quoted back to the analyst queue.<br/>Three chases without a response ends the loop"]
+  F3["<b>Evidence</b><br/>unreadable or corrupt documents produce a needs_human finding<br/>with the file reference — never a silent skip. A document that<br/>fails screening never reaches this agent at all"]
+  F4["<b>Risk Scorer</b><br/>scoring is arithmetic over model-assigned severities and makes<br/>no model call at all, so a malformed finding fails loudly<br/>rather than quietly skewing a score"]
+  F5["<b>Watchdog</b><br/>a feed outage logs and skips.<br/>It never blocks or degrades an active review"]
+
+  PRINCIPLE{"<b>One principle underneath all of it</b><br/>a security product that guesses is worse<br/>than one that stops. Every path here ends<br/>with a human being told what happened —<br/>never with the fleet quietly choosing<br/>an answer for them"}
+
+  P1["<b>Message poisoning</b> → DLQ after five delivery attempts<br/>→ NEEDS_HUMAN card on the dashboard"]
+  P2["<b>Invalid state transition</b> → raises, lands in<br/>NEEDS_HUMAN, never silently corrects"]
+  P3["<b>Crash between claim and effect</b> → an in_progress record<br/>older than the timeout is surfaced for reconciliation.<br/>For email the safe default is do not resend, flag for confirmation"]
+  P4["<b>Half-configured startup</b> → config.py validates with Pydantic<br/>at import and fails loudly. A service that boots half-configured<br/>produces the worst class of demo failure"]
+  P5["<b>OPTIONAL controls degrade.</b> Scrubber unavailable → warning,<br/>proceed with the screened text. Embedding or KNN index unavailable →<br/>warning, whole-document fallback. Neither is ever on the critical path"]
+  P7["<b>MANDATORY controls fail closed.</b> Model Armor unavailable →<br/>nothing is promoted out of quarantine, no model receives external<br/>content, affected reviews park in NEEDS_HUMAN with a card.<br/>A <i>skipped</i> detector is treated as unscreened, not as clean"]
+  P8["<b>Late or out-of-order event</b> → a reply after SCORED attaches as an<br/>addendum and reopens the score; evidence.screened before a plan parks and<br/>retries; watchdog.hit deduplicates on signal id; any event for a DECIDED<br/>review appends and never mutates. Pub/Sub guarantees delivery, not sequence"]
+  P9["<b>Cost ceiling exceeded</b> → the review parks in NEEDS_HUMAN with a<br/>cost card and model calls stop. Budgets are enforced, not observed"]
+  P6["<b>GEAP component unavailable in your region</b> → the same contract<br/>behind the existing interface, stated plainly in the README and the<br/>video. A judge respects a labelled substitution, not a false claim"]
+
+  F1 --> PRINCIPLE
+  F2 --> PRINCIPLE
+  F3 --> PRINCIPLE
+  F4 --> PRINCIPLE
+  F5 --> PRINCIPLE
+  PRINCIPLE --> P1
+  PRINCIPLE --> P2
+  PRINCIPLE --> P3
+  PRINCIPLE --> P4
+  PRINCIPLE --> P5
+  PRINCIPLE --> P6
+  PRINCIPLE --> P7
+  PRINCIPLE --> P8
+  PRINCIPLE --> P9
+  P5 -.-> P7
+
+  classDef ag fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a
+  classDef pl fill:#fef3c7,stroke:#b45309,stroke-width:2px,color:#78350f
+  classDef pr fill:#dcfce7,stroke:#15803d,stroke-width:2.5px,color:#14532d
+  class F1,F2,F3,F4,F5 ag
+  class P1,P2,P3,P4,P5,P6,P8,P9 pl
+  classDef closed fill:#fee2e2,stroke:#b91c1c,stroke-width:2.5px,color:#7f1d1d
+  class P7 closed
+  class PRINCIPLE pr

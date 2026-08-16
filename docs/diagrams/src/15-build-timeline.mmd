@@ -1,0 +1,50 @@
+---
+title: "Drawbridge — Twenty-day solo build plan"
+---
+gantt
+  title Drawbridge · 11 August to 1 September 2026 · solo · roughly 170 hours
+  dateFormat YYYY-MM-DD
+  axisFormat %d %b
+  todayMarker off
+
+  section Phase 0 · Foundations
+  Rules read, GEAR badge, free sandbox     :done, p0a, 2026-08-11, 1d
+  Project, credits, budget alerts, APIs    :done, p0b, 2026-08-11, 2d
+  Hello world on Agent Engine and Cloud Run:crit, done, p0c, 2026-08-12, 1d
+  ADK 2 pin and graph_dump structural diagram:done, p0f, 2026-08-12, 1d
+  Synthetic vendor pack and rubric         :done, p0d, 2026-08-12, 2d
+  Long running agents webinar              :milestone, done, p0e, 2026-08-13, 0d
+
+  section Phase 1 · The spine
+  Shared kernel, gateway, idempotency      :crit, p1a, 2026-08-14, 3d
+  Orchestrator and Questionnaire           :p1b, 2026-08-15, 3d
+  Evidence extraction and cross-examination:p1c, 2026-08-17, 3d
+  Evidence chunking, embedding and retrieval:crit, p1e, 2026-08-17, 3d
+  Risk Scorer and dashboard v1             :p1d, 2026-08-18, 2d
+  M1 · a stranger could watch J1 happen    :milestone, crit, m1, 2026-08-19, 0d
+
+  section Phase 2 · Armor and steel
+  Quarantine to clean promotion pipeline   :crit, p2a, 2026-08-20, 2d
+  Model Armor and Adversarial Conduct flag :crit, p2b, 2026-08-21, 2d
+  Kill and resume, idempotency in anger    :crit, p2c, 2026-08-22, 2d
+  Per agent identities and asymmetric tokens:p2d, 2026-08-23, 2d
+  Re-tiering and Memory Bank write guard   :p2f, 2026-08-23, 2d
+  Registry publication and dashboard v2    :p2e, 2026-08-24, 1d
+  M2 · all four demo pillars work on demand:milestone, crit, m2, 2026-08-24, 0d
+
+  section Phase 3 · The proof layer
+  OTel spans everywhere                    :p3a, 2026-08-25, 1d
+  Audit binder generator                   :crit, p3b, 2026-08-25, 2d
+  Time compression and demo runner         :p3c, 2026-08-26, 1d
+  Public surface hardening                 :crit, p3f, 2026-08-26, 1d
+  Injection corpus and published rate      :crit, p3g, 2026-08-26, 2d
+  Docs site, README and diagrams           :p3d, 2026-08-26, 2d
+  Stretch · Gemma scrubber and live feeds  :p3e, 2026-08-27, 1d
+
+  section Phase 4 · The performance
+  Feature freeze and three live takes      :crit, p4a, 2026-08-28, 1d
+  Video assembly and console B roll        :p4b, 2026-08-28, 1d
+  Devpost draft, Medium article, socials   :crit, p4c, 2026-08-29, 1d
+  Cold follow your own README and fix      :p4d, 2026-08-30, 1d
+  Buffer for platform surprises only       :p4e, 2026-08-31, 1d
+  Deadline 5.30 AM IST                     :milestone, crit, dl, 2026-09-01, 0d

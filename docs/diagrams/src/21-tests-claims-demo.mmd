@@ -1,0 +1,52 @@
+---
+title: "Drawbridge — The tests, the architectural claims they defend, and what a judge watches happen"
+---
+flowchart LR
+  subgraph T["THE TESTS — written before the features they cover"]
+    direction TB
+    T1["<b>test_idempotency.py</b><br/>SIGKILL at questionnaire_send, restart,<br/>assert the vendor inbox holds exactly one email"]
+    T2["<b>test_resume.py</b><br/>kill at evidence_review, restart,<br/>assert completed steps are a prefix and the review reaches GATED"]
+    T3["<b>test_armor_flow.py</b><br/>run NimbusWrite, assert adversarial_conduct, Trust Score<br/>at least 25 below baseline, band escalate — then run the<br/>twelve-variant corpus and assert the published rate,<br/>and zero false positives on the three clean packs"]
+    T4["<b>test_iam_boundaries.py</b><br/>the evidence agent attempts to send email<br/>and the gateway raises PolicyViolation"]
+    T5["<b>test_cross_exam.py</b><br/>run DataDynamo, assert an access_control finding with<br/>contradiction true whose evidence_ref resolves to a chunk<br/>containing the SOC 2 exception language"]
+    T6["<b>test_retier.py</b> · <b>test_late_events.py</b> · <b>test_token_forgery.py</b><br/>evidence overrules intake and the plan version increments;<br/>a reply after SCORED reopens rather than vanishing;<br/>the gateway cannot mint what it can verify"]
+  end
+
+  subgraph C["THE CLAIM EACH ONE DEFENDS"]
+    direction TB
+    C1["Side effects happen exactly once<br/>across retries, restarts and redeliveries"]
+    C2["Recoverability is structural,<br/>not special-case recovery code"]
+    C3["<b>The defence is measured, not asserted.</b><br/>Adversarial content is a trust signal rather than<br/>a blocked request — and the detection rate is published"]
+    C4["Least privilege is enforced,<br/>not merely documented"]
+    C5["The Evidence agent reconciles against a retrieved<br/>passage, and can point at it"]
+    C6["The fleet overrules the intake form, survives<br/>an unordered bus, and cannot forge a human decision"]
+  end
+
+  subgraph D["WHAT THE JUDGE SEES ON CAMERA"]
+    direction TB
+    D1["2:20 · the runtime killed live,<br/>then one email in the inbox"]
+    D2["2:20 · the review resumes at the exact step"]
+    D3["1:45 · the money shot — blocked, flagged,<br/>and the Trust Score falls 25 points<br/>3:10 · the detection-rate table in the README"]
+    D4["3:10 · the IAM console filtered to the fleet,<br/>and a test failing as designed"]
+    D5["1:20 · MFA claimed everywhere, contradicted by<br/>their own SOC 2 exceptions, quoting the retrieved passage"]
+    D6["1:35 · the tier badge changes from 2 to 1,<br/>with the vendor's own answer named as the reason"]
+  end
+
+  CI["<b>scenarios/demo_runner.py runs in CI on every push</b><br/>against fixtures, not live models, so it stays free — and so you never<br/>discover on 28 August that the demo path broke on 24 August.<br/>The corpus run is the one job worth real model calls, on a schedule"]
+
+  T1 --> C1 --> D1
+  T2 --> C2 --> D2
+  T3 --> C3 --> D3
+  T4 --> C4 --> D4
+  T5 --> C5 --> D5
+  T6 --> C6 --> D6
+  T -.-> CI
+
+  classDef t fill:#fef3c7,stroke:#b45309,stroke-width:2px,color:#78350f
+  classDef c fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a
+  classDef d fill:#dcfce7,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef ci fill:#f8fafc,stroke:#334155,stroke-width:1.5px,color:#0f172a
+  class T1,T2,T3,T4,T5,T6 t
+  class C1,C2,C3,C4,C5,C6 c
+  class D1,D2,D3,D4,D5,D6 d
+  class CI ci

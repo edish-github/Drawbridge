@@ -1,0 +1,55 @@
+---
+title: "Drawbridge — The fourth-party chain: your vendor's vendors, diffed against your own register"
+---
+flowchart LR
+  ORG["<b>Your organisation</b><br/>reviewed and signed exactly one contract"]
+  V["<b>DataDynamo Logistics</b> · Tier 1<br/>reviewed · Trust Score 64 · conditional"]
+
+  EXTRACT["<b>Structured extraction</b> · Gemini 3.5 Flash<br/>name · purpose · processes customer data<br/>jurisdiction · agreement claimed<br/>five fields, and the model reads nothing else"]
+  REG[("<b>approved_vendors</b><br/>this organisation's own register<br/>readers and no writer, in all 10 identities —<br/>an agent that could write to it could make<br/>an unknown fourth party known")]
+  DIFF["<b>Set difference and date comparison</b><br/>no model call below this line —<br/>every finding is source=rule"]
+
+  S1["<b>Sendline Notifications</b><br/>recipient names, phones, addresses · EU (Dublin)<br/><b>not on the register · never reviewed here</b>"]
+  S2["<b>Wayfarer Geocoding</b><br/>origin and destination addresses · EU (Paris)<br/>on the register · <b>review lapsed 2025-09-30</b>"]
+  S3["<b>Aurelius Cloud Services</b><br/>hosting and storage · EU (Frankfurt)<br/>on the register · rv-2024-0117 current"]
+  S4["<b>Ledgerbridge Analytics</b><br/>internal usage counters, no customer data<br/>on the register · rv-2025-0088 current"]
+
+  F1["<b>unknown_fourth_party</b> · medium<br/>one per company"]
+  F2["<b>register_review_expired</b> · low<br/>date computed, not declared"]
+  F3["<b>no_dpa_claimed</b> · low<br/>one per vendor · stated absence only"]
+  F4["<b>jurisdiction_outside_residency</b> · medium<br/>one per vendor · only if intake states one"]
+
+  BEAT["<b>Beat · fourth_party_gap</b><br/>named on the timeline before the gate,<br/>not in row four of a table after it"]
+  GATE{"<b>Every finding gates on<br/>processes_customer_data</b><br/>a telemetry provider receiving counters<br/>raises nothing — sixteen findings about<br/>one vendor is how a feature becomes<br/>the tab nobody opens"}
+
+  ORG -- "one contract" --> V
+  V --> EXTRACT
+  EXTRACT --> DIFF
+  REG --> DIFF
+  DIFF --> S1
+  DIFF --> S2
+  DIFF --> S3
+  DIFF --> S4
+
+  S1 ==> F1
+  S2 --> F2
+  S4 -. "silent · raises nothing" .-> GATE
+  GATE --- F3
+  GATE --- F4
+  F1 ==> BEAT
+
+  classDef org fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a
+  classDef known fill:#dcfce7,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef lapsed fill:#fef3c7,stroke:#b45309,stroke-width:2px,color:#78350f
+  classDef unknown fill:#fee2e2,stroke:#b91c1c,stroke-width:2.5px,color:#7f1d1d
+  classDef proc fill:#ede9fe,stroke:#6d28d9,stroke-width:2px,color:#4c1d95
+  classDef gate fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12
+  class ORG,V org
+  class S3,S4,REG known
+  class S2,F2,F3,F4 lapsed
+  class S1,F1,BEAT unknown
+  class EXTRACT,DIFF proc
+  class GATE gate
+
+  linkStyle 8 stroke:#b91c1c,stroke-width:3px,color:#b91c1c
+  linkStyle 13 stroke:#b91c1c,stroke-width:3px,color:#b91c1c

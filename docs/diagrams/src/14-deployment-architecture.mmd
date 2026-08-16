@@ -1,0 +1,79 @@
+---
+title: "Drawbridge — Deployment and cost posture"
+---
+flowchart TB
+  subgraph DEV["DEVELOPMENT — one dedicated project, never an existing one"]
+    direction LR
+    WS["<b>Developer workstation</b><br/>Python 3.11 · Node 20 · gcloud · Docker · OBS<br/>public repo from day one"]
+    MAKE["<b>Makefile is the front door</b><br/>bootstrap · seed · run-local<br/>deploy · demo · teardown · test"]
+    ADK["<b>adk web agents/</b><br/>local dev UI against emulators"]
+  end
+
+  subgraph BUILD["BUILD PIPELINE"]
+    direction LR
+    CB["<b>Cloud Build</b><br/>container images"]
+    AR["<b>Artifact Registry</b><br/>drawbridge"]
+  end
+
+  subgraph RUNTIME["GOOGLE CLOUD RUNTIME — one region for everything"]
+    direction LR
+    AE["<b>Vertex AI Agent Engine</b><br/>ADK 2 graph workflow · five agents, five identities<br/>plus sa-armor for the screening pipeline<br/>long-running, resumable"]
+    CR1["<b>Cloud Run</b> · dashboard"]
+    CR2["<b>Cloud Run</b> · vendor portal"]
+    CR3["<b>Cloud Run</b> · inbox simulator"]
+    CR4["<b>Cloud Run</b> · binder service"]
+    CR5["<b>Cloud Run</b> · Gemma scrubber"]
+  end
+
+  subgraph DATA["MANAGED DATA PLANE"]
+    direction LR
+    FS[("Firestore native")]
+    GCS[("Storage · quarantine<br/>clean · binders")]
+    PS["Pub/Sub topics and DLQs"]
+    SM["Secret Manager<br/>private approval signing key<br/>the gateway holds only the public half"]
+    SCH["Cloud Scheduler"]
+  end
+
+  subgraph COST["COST ENGINEERING — the number no competitor will show"]
+    direction LR
+    BA["<b>Budget alerts</b> at 50, 100 and 130<br/>of the 150 dollar credit"]
+    MIN["<b>Cloud Run</b> min-instances 0<br/>max-instances 2 · CPU throttling on"]
+    ROUTE["<b>Flash-first routing</b><br/>Pro only for cross-examine and memo"]
+    METER["<b>Per-review meter</b><br/><b>enforced</b> past 1.00 dollars — the review parks<br/>in NEEDS_HUMAN with a cost card. A budget that is<br/>observed rather than enforced is not a control"]
+    PUBSAFE["<b>Public surface</b><br/>statically rendered · no model path<br/>rate-limited · max-instances 2"]
+    LIFECYCLE["<b>Quarantine lifecycle</b><br/>objects deleted after 7 days"]
+    TD["<b>make teardown</b> after the final take<br/>only the demo dashboard stays live"]
+  end
+
+  WS --> MAKE
+  MAKE --> ADK
+  MAKE --> CB --> AR
+  AR --> AE
+  AR --> CR1
+  AR --> CR2
+  AR --> CR3
+  AR --> CR4
+  AR --> CR5
+  AE --> FS
+  AE --> PS
+  CR2 --> GCS
+  CR4 --> GCS
+  AE --> SM
+  SCH --> PS
+  RUNTIME -.-> COST
+
+  DAY1["<b>Non-negotiable, 11 to 12 August</b> — deploy a hello-world agent to Agent Engine and a hello-world<br/>service to Cloud Run before writing any product code, after burning the learning curve in the free GEAR<br/>sandbox. Platform friction must surface on 11 August, with twenty days of slack, not on 29 August with none."]
+  DEV -.-> DAY1
+
+  classDef dev fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a
+  classDef build fill:#f3e8ff,stroke:#7e22ce,stroke-width:2px,color:#581c87
+  classDef run fill:#dcfce7,stroke:#15803d,stroke-width:2px,color:#14532d
+  classDef data fill:#e0f2fe,stroke:#0369a1,stroke-width:2px,color:#0c4a6e
+  classDef cost fill:#fef3c7,stroke:#b45309,stroke-width:2px,color:#78350f
+  classDef note fill:#fff7ed,stroke:#ea580c,stroke-width:2px,color:#7c2d12
+  class WS,MAKE,ADK dev
+  class CB,AR build
+  class AE,CR1,CR2,CR3,CR4,CR5 run
+  class FS,GCS,PS,SM,SCH data
+  class BA,MIN,ROUTE,METER,TD,PUBSAFE,LIFECYCLE cost
+  class DAY1 note

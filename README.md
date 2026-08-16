@@ -35,6 +35,12 @@ reading a table, weighing a claim against a passage, and grading how badly a con
 
 TODO — YouTube link, recorded 28 August.
 
+## Documentation
+
+[`docs/`](docs/README.md) — [Getting started](docs/getting-started.md) ·
+[Architecture](docs/architecture.md) · [Security](docs/security.md) ·
+[Live demo](docs/live-demo.md) · [Diagrams](docs/diagrams/README.md)
+
 ## Architecture
 
 Five agents on one event backbone, and every arrow between them is a Pub/Sub topic:

@@ -1,0 +1,33 @@
+---
+title: "Drawbridge — The four-minute demo, shot by shot"
+---
+gantt
+  title Target 3.55 · the core segment from 1.20 to 3.10 is one unbroken live take · record three, on three different days
+  dateFormat mm-ss
+  axisFormat %M:%S
+  todayMarker off
+
+  section Cold open
+  The problem in numbers                        :c1, 00-00, 25s
+  Registry — a fleet, not a chatbot              :c2, 00-25, 20s
+
+  section Setup
+  Intake, tiering, dossier · 12 reviews in flight :s1, 00-45, 20s
+  Questionnaire sent, after a human approves     :s2, 01-05, 15s
+
+  section Live segment
+  Time-compression badge goes on screen          :crit, l1, 01-20, 10s
+  Replies arrive, the SOC 2 is ingested          :l2, 01-30, 15s
+  The MFA contradiction surfaces                 :l3, 01-30, 5s
+  Re-tier · the fleet overrules the intake form  :l3b, 01-35, 10s
+  Injection blocked, Trust Score falls 25        :crit, l4, 01-45, 35s
+  PILLAR 1 · adversarial conduct                 :milestone, crit, m1, 02-05, 0s
+  Runtime killed on camera, resumes, one email   :crit, l5, 02-20, 30s
+  PILLAR 2 · kill and resume                     :milestone, crit, m2, 02-40, 0s
+  The CISO approves at the gate                  :crit, l6, 02-50, 20s
+  PILLAR 3 · the human gate                      :milestone, crit, m3, 03-05, 0s
+
+  section Proof
+  Binder export, detection table, console montage:p1, 03-10, 25s
+  PILLAR 4 · the audit binder                    :milestone, crit, m4, 03-20, 0s
+  Metrics card and close                         :p2, 03-35, 20s

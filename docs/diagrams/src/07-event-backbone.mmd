@@ -1,0 +1,83 @@
+---
+title: "Drawbridge — Event backbone: agents react to events, they never poll"
+---
+flowchart LR
+  subgraph PUB["PUBLISHERS"]
+    direction TB
+    DASHP["Dashboard"]
+    PORTAL["Vendor portal"]
+    INBOX["Inbox service"]
+    ARMORP["Armor pipeline"]
+    SCHED["Cloud Scheduler"]
+  end
+
+  subgraph TOPICS["PUB/SUB TOPICS"]
+    direction TB
+    T1["review.intake"]
+    T2["review.plan_ready"]
+    T3["vendor.reply_received"]
+    T4["vendor.evidence_uploaded"]
+    T5["evidence.screened"]
+    T6["review.findings_ready"]
+    T7["review.score_ready"]
+    T8["review.approved"]
+    T9["watchdog.hit"]
+    T10["watchdog.sweep<br/><i>scheduled trigger</i>"]
+    T11["review.rescore<br/><i>raised by adversarial conduct</i>"]
+  end
+
+  subgraph SUB["CONSUMERS — every one idempotent, because delivery is at-least-once"]
+    direction TB
+    O["Orchestrator"]
+    Q["Questionnaire"]
+    E["Evidence"]
+    R["Risk Scorer"]
+    W["Watchdog"]
+  end
+
+  ENV["<b>EventEnvelope</b> — one shape for every message<br/>event_id · type · review_id<br/><b>idem_key</b> = review_id, plan_vN and step_id<br/><b>trace_id</b> ties the event to its span tree<br/>source · ts · payload<br/><br/>this uniformity is what makes tracing,<br/>replay and idempotency work at all"]
+  DLQ["<b>Dead letter after five delivery attempts</b><br/>the review moves to NEEDS_HUMAN and surfaces<br/>as a dashboard card — visible failure handling<br/>is a graded behaviour, so make it visible"]
+  ACK["Ack deadline 60s, extended explicitly<br/>for long model calls"]
+  ORDER["<b>At-least-once — and NO ordering guarantee</b><br/>duplicates are handled by the idempotency key; <i>sequence</i> is handled here.<br/>Every consumer checks review state before acting: a reply after SCORED attaches<br/>as an addendum and reopens the score; evidence.screened before a plan parks and<br/>retries; watchdog.hit deduplicates on signal id; any event for a DECIDED review<br/>appends and never mutates. A decided review is immutable."]
+
+  DASHP --> T1
+  DASHP --> T8
+  PORTAL --> T4
+  INBOX --> T3
+  ARMORP --> T5
+  ARMORP --> T11
+  SCHED --> T10
+
+  T1 --> O
+  T2 --> Q
+  T3 --> Q
+  T4 --> ARMORP
+  T5 --> E
+  T6 --> R
+  T7 --> O
+  T8 --> O
+  T8 --> W
+  T9 --> O
+  T10 --> W
+  T11 --> R
+
+  O --> T2
+  E --> T6
+  R --> T7
+  W --> T9
+
+  ENV -.-> TOPICS
+  TOPICS -.-> DLQ
+  TOPICS -.-> ACK
+  TOPICS -.-> ORDER
+
+  classDef pub fill:#ffedd5,stroke:#c2410c,stroke-width:2px,color:#7c2d12
+  classDef top fill:#e0f2fe,stroke:#0369a1,stroke-width:2px,color:#0c4a6e
+  classDef sub fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a
+  classDef meta fill:#e2e8f0,stroke:#334155,stroke-width:2px,color:#0f172a
+  classDef bad fill:#fee2e2,stroke:#b91c1c,stroke-width:2px,color:#7f1d1d
+  class PORTAL,DASHP,INBOX,ARMORP,SCHED pub
+  class T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11 top
+  class O,Q,E,R,W sub
+  class ENV,ACK,ORDER meta
+  class DLQ bad

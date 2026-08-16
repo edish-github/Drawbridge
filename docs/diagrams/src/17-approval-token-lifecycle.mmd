@@ -1,0 +1,51 @@
+---
+title: "Drawbridge — Human gates: one primitive, two gates, zero ways around it"
+---
+sequenceDiagram
+  autonumber
+  participant AG as Agent
+  participant GW as Agent Gateway · PUBLIC key only
+  participant D as Approval service · PRIVATE key only
+  actor H as Named human
+  participant SM as Secret Manager
+  participant FS as Firestore
+
+  rect rgb(254, 226, 226)
+  Note over AG,GW: The agent tries to act on the outside world
+  AG->>GW: call_tool send_email to vendor contact
+  GW->>GW: verify_approval_token with the public key — none exists for this scope
+  GW--xAG: PolicyViolation P1
+  GW->>FS: structured policy-block log line and a dashboard event
+  Note right of GW: This blocked line on screen during the demo<br/>is worth more than the code that produced it
+  end
+
+  rect rgb(255, 237, 213)
+  Note over D,SM: The human, and only the human, can produce the missing artefact
+  FS->>D: approval card — review parked in GATED, gate_scope contact, human gate G2
+  H->>D: one tap authorises first contact
+  D->>SM: fetch drawbridge-approval-key — the PRIVATE half
+  SM-->>D: private signing key, held nowhere else in the project
+  D->>D: sign payload RS256 — review_id, scope, identity, jti, expiry 24h
+  D->>FS: record jti as unspent
+  D-->>AG: signed single-use scoped token
+  end
+
+  rect rgb(220, 252, 231)
+  Note over AG,FS: The effect happens once, and is attributable forever
+  AG->>GW: retry send_email with the token
+  GW->>FS: check jti — unspent and unexpired
+  GW->>GW: idempotency claim on review_id questionnaire_send v1
+  GW-->>AG: send permitted, thread now delegated
+  GW->>FS: mark jti spent
+  end
+
+  rect rgb(237, 233, 254)
+  Note over AG,H: Replay and escalation both fail closed
+  AG->>GW: replay the same token
+  GW--xAG: rejected, jti already spent
+  AG->>GW: attempt to set state DECIDED without a decision token
+  GW--xAG: rejected — no code path can approve a vendor
+  AG->>GW: read everything the gateway holds and forge a token
+  GW--xAG: rejected — the gateway holds only a public key
+  Note over H,FS: G1 uses the identical primitive with scope decision.<br/>Signing is ASYMMETRIC: if both sides shared one secret, anything that<br/>could verify could also forge — and every agent can reach the gateway.<br/>Rotation publishes a new public key. The gateway never holds signing<br/>capability at any point in its life. It can RECOGNISE a human decision<br/>and is structurally incapable of MANUFACTURING one.
+  end
