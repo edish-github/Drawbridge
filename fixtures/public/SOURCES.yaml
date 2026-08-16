@@ -1,0 +1,61 @@
+# Real documents the extractor is tested against.
+#
+# The synthetic packs were written by the same person who wrote the extractor, in a format the
+# extractor expects, and they parse suspiciously well. That is a test of the fixtures. A real
+# assurance report — written by an audit firm for an audience that is not this system, with its
+# own headings, its own tables and its own idea of where a conclusion belongs — is a test of
+# the extractor.
+#
+# Nothing here is committed as bytes. Each entry states where the document lives, the checksum
+# of the exact revision the recorded results were produced from, and why it is not redistributed
+# from this repository. `python -m fixtures.public.fetch` downloads and verifies them.
+#
+# What these documents are used for, and what they are never used for, is in ETHICS below and
+# enforced by tests/test_real_document.py.
+
+documents:
+  - id: nara-fisma-2024
+    title: >-
+      National Archives and Records Administration's Fiscal Year 2024 Federal Information
+      Security Modernization Act of 2014 Audit (OIG Audit Report No. 24-AUD-07)
+    url: https://naraoig.oversight.gov/sites/default/files/reports/2024-10/FINAL-REPORT-NARAs-FY-2024-FISMA-Audit-24-AUD-07.pdf
+    sha256: 20dd1ff49177ee6a87a81c9d738b871c294a1e7be51b4359c30ba85494b2cdd8
+    bytes: 922652
+    filename: nara-fisma-2024.pdf
+    publisher: NARA Office of Inspector General
+    published: 2024-09-27
+
+    # Chosen because it is the right *shape* and the wrong *format*: an independent firm, a
+    # named period, a stated scope, a conclusion, findings in numbered sections and the detail
+    # in appendices — arranged nothing like the synthetic packs. It is also an audit of an
+    # information security programme rather than a financial statement, so the vocabulary is
+    # the vocabulary this system reads.
+    why: an independent security audit written for an audience that is not this system
+
+    # The OIG's covering letter is a work of the United States Government and carries no
+    # copyright. The attached auditor's report is a contractor work product that the agency
+    # publishes; no copyright notice appears anywhere in the file, but absence of notice has
+    # not waived copyright since 1989, and a contracted work can be held by the contractor.
+    # That is not a licence anyone here can verify, so the bytes stay where their publisher put
+    # them and this repository stores a URL and a checksum. Downloading a public government
+    # audit report is not a permission question; republishing it is.
+    redistributable: unverified
+    licence_note: >-
+      US Government work in part; the contracted auditor's report carries no stated licence.
+      Fetched, never vendored.
+
+ethics:
+  # This document names a real organisation and a real audit firm. What it is used for here is
+  # narrow and the narrowness is enforced, not merely intended.
+  permitted:
+    - control and fact extraction, to measure what the extractor reads off real formatting
+  never:
+    - a Trust Score
+    - a finding
+    - a review of any kind
+    - any adverse conclusion about the named organisation or the named firm
+
+  # The conclusion in this report is the auditors' and the agency's, published by them. This
+  # system reproduces no part of it as its own judgement, and the test that would let it is the
+  # test that is asserted not to exist.
+  enforced_by: tests/test_real_document.py
