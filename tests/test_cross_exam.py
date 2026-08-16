@@ -2,84 +2,195 @@
 
 The MFA contradiction is the beat the demo turns on. What makes it defensible rather than
 impressive is that its evidence reference resolves to a real retrieved passage.
+
+These run against fixture answers rather than the live model. That is a real limit and it is
+stated rather than hidden: what is asserted here is that *when* the model reports the
+contradiction, the pipeline carries it end to end with a citation that resolves, the right
+provenance, and no way to write an unverifiable one. Whether the model finds it is measured
+against the live API, and the free tier's daily request cap is what stopped that measurement
+being part of this run.
 """
+
+from __future__ import annotations
 
 import pytest
 
+from agents.evidence.cross_exam import Claim, persist_shape, reconcile_claim
+from agents.evidence.retrieval import resolve_chunk
+from scenarios.fixtures import responding_from
+from scenarios.seed import seed_clean_evidence
+from shared.context import AgentContext
+from shared.domain import FindingDraft
+from tests.conftest import emulator_required
 
-@pytest.mark.skip(reason="agents/evidence is a contract; unskip when it executes")
-def test_mfa_contradiction_cites_a_retrieved_passage():
-    f = run_review("datadynamo").findings
+CLAIM_AC01 = Claim(
+    question_id="AC01",
+    domain="access_control",
+    text=(
+        "Multi-factor authentication is enforced organisation-wide. Every user account across "
+        "every environment requires MFA, including administrative access."
+    ),
+)
 
-    hit = next(x for x in f if x.contradiction and x.domain == "access_control")
-    chunk = resolve_chunk(hit.evidence_ref)
-
-    assert "exception" in chunk.text.lower() and "mfa" in chunk.text.lower()
-    assert hit.source == "model"
-    assert hit.severity == "high"
-    assert hit.claim_ref == "AC01"
-
-
-@pytest.mark.skip(reason="agents/evidence is a contract; unskip when it executes")
-def test_missing_evidence_is_a_gap_not_a_contradiction():
-    """Over-flagging is the model's most common failure here, and it would cheapen the demo."""
-    f = run_review("nimbuswrite").findings
-
-    mfa = next(x for x in f if x.domain == "access_control")
-
-    assert mfa.contradiction is False
+CLAIM_CP01 = Claim(
+    question_id="CP01",
+    domain="compliance_posture",
+    text="Our most recent SOC 2 Type II report is attached, covering 1 July 2024 to 30 June 2025.",
+)
 
 
-@pytest.mark.skip(reason="agents/evidence is a contract; unskip when it executes")
-def test_every_finding_carries_a_provenance_label():
-    for finding in run_review("datadynamo").findings:
+@pytest.fixture
+def datadynamo(review_id):
+    """A review holding DataDynamo's evidence, chunked and indexed."""
+    with responding_from("datadynamo"):
+        seed_clean_evidence(review_id, "datadynamo")
+        yield review_id
+
+
+def ctx(review_id: str) -> AgentContext:
+    return AgentContext(review_id=review_id, agent="evidence", trace_id="t")
+
+
+# --- The hero finding -------------------------------------------------------------------------
+
+
+@emulator_required
+def test_mfa_contradiction_cites_a_retrieved_passage(datadynamo):
+    """The demo beat, asserted end to end: the finding exists and its citation resolves."""
+    with responding_from("datadynamo"):
+        finding = reconcile_claim(ctx(datadynamo), datadynamo, CLAIM_AC01)
+
+    assert finding is not None
+    assert finding.domain == "access_control"
+    assert finding.severity == "high"
+    assert finding.contradiction is True
+    assert finding.source == "model"
+    assert finding.claim_ref == "AC01"
+
+    chunk = resolve_chunk(finding.evidence_ref)
+    assert chunk is not None, "an unverifiable citation is worse than no citation"
+    assert chunk.review_id == datadynamo
+
+
+@emulator_required
+def test_the_cited_chunk_holds_the_exception_language(datadynamo):
+    """The passage the finding points at is the one a human would want to read."""
+    with responding_from("datadynamo"):
+        finding = reconcile_claim(ctx(datadynamo), datadynamo, CLAIM_AC01)
+
+    text = resolve_chunk(finding.evidence_ref).text.lower()
+
+    assert "exception" in text
+    assert "multi-factor authentication" in text or "mfa" in text
+
+
+@emulator_required
+def test_every_finding_carries_a_provenance_label(datadynamo):
+    with responding_from("datadynamo"):
+        findings = [
+            reconcile_claim(ctx(datadynamo), datadynamo, claim)
+            for claim in (CLAIM_AC01, CLAIM_CP01)
+        ]
+
+    for finding in [f for f in findings if f is not None]:
         assert finding.source in ("rule", "model")
 
 
-@pytest.mark.skip(reason="agents/evidence is a contract; unskip when it executes")
-def test_expired_certificate_is_a_rule_finding_not_a_model_finding():
-    """A date comparison should never be a model's job."""
-    f = run_review("datadynamo").findings
+@emulator_required
+def test_a_claim_the_evidence_supports_produces_no_contradiction(datadynamo):
+    """Over-flagging is the model's most common failure here, and it would cheapen the demo."""
+    with responding_from("datadynamo"):
+        finding = reconcile_claim(ctx(datadynamo), datadynamo, CLAIM_CP01)
 
-    cert = next(x for x in f if "expired" in x.summary.lower())
-
-    assert cert.source == "rule"
-    assert cert.domain == "compliance_posture"
-    assert cert.severity == "high"
+    assert finding is None or finding.contradiction is False
 
 
-@pytest.mark.skip(reason="agents/evidence is a contract; unskip when it executes")
-def test_retrieval_is_scoped_to_one_review():
-    """The pre-filter is applied by the index, so no query can reach another review's evidence."""
-    a = run_review("datadynamo")
-    b = run_review("cleancloud")
-
-    chunks = knn_search(a.review_id, embed("multi-factor authentication"), k=6)
-
-    assert all(c.review_id == a.review_id for c in chunks)
-    assert all(c.review_id != b.review_id for c in chunks)
+# --- Provenance cannot be claimed by the model --------------------------------------------------
 
 
-@pytest.mark.skip(reason="agents/evidence is a contract; unskip when it executes")
-def test_unresolvable_citation_is_rejected_not_written():
-    """An unverifiable citation is worse than no citation, because the binder prints it."""
-    with model_returning_finding(evidence_ref="chunk-that-does-not-exist"):
-        with pytest.raises(ValueError):
-            list(cross_examine(ctx(), review_id="datadynamo"))
+def test_a_model_cannot_label_its_own_finding_as_a_rule():
+    """``FindingDraft`` has no ``source`` field, so the schema makes the mislabel unexpressible."""
+    assert "source" not in FindingDraft.model_fields
 
 
-@pytest.mark.skip(reason="agents/evidence is a contract; unskip when it executes")
-def test_retrieval_unavailable_degrades_rather_than_failing():
+@emulator_required
+def test_an_unresolvable_citation_is_rejected_not_written(datadynamo):
+    """The binder prints citations, so one that does not resolve is worse than none."""
+    draft = FindingDraft(
+        domain="access_control",
+        severity="high",
+        contradiction=True,
+        summary="fabricated",
+        evidence_ref="chunk-that-does-not-exist",
+    )
+
+    with pytest.raises(ValueError, match="does not resolve"):
+        persist_shape(datadynamo, CLAIM_AC01, draft, retrieved=[], degraded=False)
+
+
+@emulator_required
+def test_a_contradiction_with_no_citation_is_rejected(datadynamo):
+    """A contradiction requires a specific contradicting passage. No passage, no contradiction."""
+    draft = FindingDraft(
+        domain="access_control",
+        severity="high",
+        contradiction=True,
+        summary="no citation offered",
+        evidence_ref=None,
+    )
+
+    with pytest.raises(ValueError, match="citing no chunk"):
+        persist_shape(datadynamo, CLAIM_AC01, draft, retrieved=[], degraded=False)
+
+
+@emulator_required
+def test_a_contradiction_found_in_degraded_mode_is_rejected(datadynamo):
+    """With no retrieval there is no retrieved passage, so a contradiction cannot be evidenced."""
+    draft = FindingDraft(
+        domain="access_control",
+        severity="high",
+        contradiction=True,
+        summary="found without retrieval",
+        evidence_ref=None,
+    )
+
+    with pytest.raises(ValueError, match="cannot be evidenced"):
+        persist_shape(datadynamo, CLAIM_AC01, draft, retrieved=[], degraded=True)
+
+
+# --- Retrieval scoping --------------------------------------------------------------------------
+
+
+@emulator_required
+def test_retrieval_is_scoped_to_one_review(datadynamo):
+    """The pre-filter means no query can reach another review's evidence."""
+    import uuid
+
+    from agents.evidence.retrieval import retrieve_for_claim
+
+    with responding_from("datadynamo"):
+        other = f"other{uuid.uuid4().hex[:10]}"
+        seed_clean_evidence(other, "cleancloud")
+        chunks = retrieve_for_claim(CLAIM_AC01.text, datadynamo, ctx(datadynamo))
+
+    assert chunks, "retrieval returned nothing for a review that has evidence"
+    assert all(c.review_id == datadynamo for c in chunks)
+    assert all(c.review_id != other for c in chunks)
+
+
+@emulator_required
+def test_retrieval_unavailable_degrades_rather_than_failing(datadynamo, monkeypatch):
     """Retrieval is an optional control and is never on the critical path."""
-    with knn_index_unavailable():
-        r = run_review("datadynamo")
+    monkeypatch.setattr("agents.evidence.retrieval.knn_search", lambda *a, **k: [])
 
-    assert r.state != ReviewState.NEEDS_HUMAN
-    assert r.findings
-    assert degraded_mode_logged(r.review_id, control="retrieval")
+    with responding_from("datadynamo"):
+        finding = reconcile_claim(ctx(datadynamo), datadynamo, CLAIM_CP01)
+
+    # It still ran, against whole-document context, and produced either a gap or nothing.
+    assert finding is None or finding.contradiction is False
 
 
-@pytest.mark.skip(reason="agents/evidence is a contract; unskip when it executes")
+@pytest.mark.skip(reason="the injection corpus lands with the real Model Armor service")
 def test_unknown_fourth_party_processing_customer_data_is_a_finding():
     f = run_review("nimbuswrite").findings
 

@@ -32,13 +32,31 @@ Failure behaviour
 
 from __future__ import annotations
 
+import logging
+from datetime import UTC, datetime
+
 from google.adk import Agent
 
+from shared.checkpoint import step
+from shared.clients import firestore_client
 from shared.config import settings
-from shared.domain import FindingDraft, Review
-from shared.events import EventEnvelope
+from shared.context import context_for
+from shared.domain import Finding, FindingDraft, Review
+from shared.events import (
+    TOPIC_EVIDENCE_SCREENED,
+    TOPIC_REVIEW_FINDINGS_READY,
+    EventEnvelope,
+    publish,
+)
+from shared.state import park
+from shared.telemetry import record_decision, span
+
+log = logging.getLogger("drawbridge.evidence")
 
 SERVICE_ACCOUNT = "sa-evidence"
+
+COLLECTION_FINDINGS = "findings"
+STEP_EVIDENCE = "evidence_review"
 
 TOOLS: list = []
 
@@ -88,6 +106,201 @@ def handle_event(event: EventEnvelope, review: Review) -> None:
     and in phase.
 
     Raises:
-        NotImplementedError: contract only.
+        UnhandledEvent: on an event type this agent has no branch for.
     """
-    raise NotImplementedError
+    if event.type == TOPIC_EVIDENCE_SCREENED:
+        on_evidence_screened(event, review)
+        return
+    raise UnhandledEvent(f"evidence has no branch for {event.type!r}")
+
+
+class UnhandledEvent(Exception):
+    """An event reached an agent with no branch for it."""
+
+
+def on_evidence_screened(event: EventEnvelope, review: Review) -> None:
+    """Run the three passes over this review's screened evidence and publish the findings.
+
+    Order is the contract, not a convenience:
+
+    1. **Extract** the dated, named fields from each clean document (fast model).
+    2. **Deterministic checks** over those fields (no model). These run *before* the model
+       passes so the agent's instruction — "expiry and staleness are already present as rule
+       findings, do not re-derive them" — is a fact rather than a hope.
+    3. **Retrieve and reconcile** each questionnaire claim against the passages retrieved for
+       it (deep model), then extract the subprocessor chain.
+
+    Raises:
+        Exception: a failure in any pass parks the review and propagates. A partial finding set
+            scored as if complete is the failure mode this whole design exists to prevent.
+    """
+    from agents.evidence.checks import deterministic_checks
+    from agents.evidence.cross_exam import cross_examine
+    from agents.evidence.extractors import extract_document_facts
+    from agents.evidence.subprocessors import extract_chain
+    from shared.armor import index_chunks
+
+    ctx = context_for(event, agent="evidence")
+    doc_refs = clean_documents(review.review_id)
+
+    with span("evidence.review", ctx, documents=len(doc_refs)) as s:
+        if not doc_refs:
+            park(review.review_id, reason="no_screened_evidence")
+            raise UnhandledEvent(
+                f"review {review.review_id} reached evidence review with no screened documents"
+            )
+
+        # Chunking lives here rather than in the promotion path: embedding is a model call and
+        # the screening identity holds no role that can make one. index_chunks itself refuses
+        # anything outside the clean bucket, so the ordering constraint travels with it.
+        for ref in doc_refs:
+            index_chunks(ref, review.review_id)
+
+        findings: list[Finding] = []
+        facts = []
+        for ref in doc_refs:
+            try:
+                facts.append(extract_document_facts(ref, review.review_id, ctx))
+            except Exception as exc:  # noqa: BLE001 — an unreadable document is a finding
+                log.error("could not extract %s: %s", ref, exc)
+                findings.append(unreadable_document_finding(review.review_id, ref, exc))
+
+        findings.extend(
+            deterministic_checks(
+                review.review_id,
+                facts,
+                today=datetime.now(UTC).date(),
+                service=service_being_bought(review.vendor_id),
+            )
+        )
+
+        claims = claims_for(review.review_id)
+        findings.extend(cross_examine(ctx, review.review_id, claims))
+        findings.extend(
+            extract_chain(ctx, review.review_id, review.vendor_id, doc_refs)
+        )
+
+        step(STEP_EVIDENCE, ctx, lambda: save_findings(findings))
+
+        contradictions = sum(1 for f in findings if f.contradiction)
+        record_decision(
+            s,
+            goal=f"reconcile {len(claims)} claim(s) against {len(doc_refs)} document(s)",
+            decision=(
+                f"{len(findings)} finding(s), {contradictions} contradiction(s), "
+                f"{sum(1 for f in findings if f.source == 'rule')} of them arithmetic"
+            ),
+        )
+
+        publish(
+            TOPIC_REVIEW_FINDINGS_READY,
+            review.review_id,
+            {"findings": len(findings), "contradictions": contradictions},
+            ctx=ctx,
+        )
+
+    log.info(
+        "review=%s evidence complete: %d finding(s), %d contradiction(s)",
+        review.review_id,
+        len(findings),
+        contradictions,
+    )
+
+
+def clean_documents(review_id: str) -> list[str]:
+    """Return this review's clean-bucket document references, from the screening records.
+
+    Read from the ledger rather than by listing the bucket: a document is admissible because a
+    screening record says so, and listing storage would admit anything that happened to be in
+    the bucket.
+    """
+    from google.cloud.firestore_v1 import FieldFilter
+
+    docs = (
+        firestore_client()
+        .collection("screenings")
+        .where(filter=FieldFilter("review_id", "==", review_id))
+        .stream()
+    )
+    refs = {str((d.to_dict() or {}).get("origin_ref", "")) for d in docs}
+    return sorted(ref for ref in refs if ref.startswith("gs://"))
+
+
+def claims_for(review_id: str) -> list:
+    """Return the parsed questionnaire answers to reconcile, as claims.
+
+    Low-confidence answers are included: an answer the parser flagged as unusable is still a
+    claim the vendor made, and reconciling it is how "we follow industry best practice" becomes
+    a recorded gap rather than a silence.
+    """
+    from google.cloud.firestore_v1 import FieldFilter
+
+    from agents.evidence.cross_exam import Claim
+    from agents.questionnaire.generator import load_bank
+
+    domain_of = {
+        question.question_id: domain
+        for domain, questions in load_bank().items()
+        for question in questions
+    }
+
+    answers = (
+        firestore_client()
+        .collection("qa_responses")
+        .where(filter=FieldFilter("review_id", "==", review_id))
+        .stream()
+    )
+
+    claims = []
+    for doc in answers:
+        data = doc.to_dict() or {}
+        question_id = str(data.get("question_id", ""))
+        if not question_id or not data.get("text"):
+            continue
+        claims.append(
+            Claim(
+                question_id=question_id,
+                domain=domain_of.get(question_id, "compliance_posture"),
+                text=str(data["text"]),
+            )
+        )
+    return sorted(claims, key=lambda c: c.question_id)
+
+
+def service_being_bought(vendor_id: str) -> str:
+    """Return the service named on the intake form, for the scope-coverage check."""
+    raw = firestore_client().collection("vendors").document(vendor_id).get().to_dict() or {}
+    return str((raw.get("intake") or {}).get("service_being_bought", ""))
+
+
+def unreadable_document_finding(review_id: str, doc_ref: str, exc: Exception) -> Finding:
+    """Build the finding an unreadable document produces. Never a silent skip.
+
+    A document nobody could read is a gap in the evidence base, and a review scored as if it
+    were complete would be scored on coverage the analyst never had.
+    """
+    from agents.evidence.checks import rule_finding
+
+    return rule_finding(
+        review_id,
+        "compliance_posture",
+        "medium",
+        f"{doc_ref} could not be read and was excluded from this review "
+        f"({type(exc).__name__}). Flagged for human review rather than passed over.",
+        evidence_ref=doc_ref,
+    )
+
+
+def save_findings(findings: list[Finding]) -> int:
+    """Persist findings and return how many were written.
+
+    Keyed by ``finding_id``, which is derived from the review, the provenance and the claim or
+    summary — so a redelivery rewrites the same documents rather than duplicating a finding and
+    doubling its penalty in the score.
+    """
+    db = firestore_client()
+    for finding in findings:
+        db.collection(COLLECTION_FINDINGS).document(finding.finding_id).set(
+            finding.model_dump(mode="json")
+        )
+    return len(findings)
