@@ -106,7 +106,10 @@ class Settings(BaseModel):
     plan_version: int = Field(default=1, gt=0)
     followup_cap: int = Field(default=2, ge=0)
     watchdog_confidence_min: float = Field(default=0.75, ge=0.0, le=1.0)
-    cost_ceiling_per_review_usd: float = Field(default=0.50, gt=0.0)
+    # Provisional until a full Tier 1 pack has been measured end to end. Measured per-call
+    # costs put a real review at $0.30-0.60, which straddles the 0.50 this replaced — a
+    # ceiling a normal review can cross is an alert about the ceiling, not about the review.
+    cost_ceiling_per_review_usd: float = Field(default=1.00, gt=0.0)
 
     demo_time_compression: int = Field(default=240, ge=1)
 
