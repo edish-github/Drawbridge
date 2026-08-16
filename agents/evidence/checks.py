@@ -9,6 +9,12 @@ cross-examination carries ``source="model"``. An auditor cares enormously about 
 distinction, and it removes a class of model error from the hero demo: an expired certificate
 becomes a guaranteed finding rather than a hoped-for one.
 
+A finding that turns on a date also carries ``date_source``, and the two labels answer
+different questions. ``rule`` says the conclusion is a comparison the code performed;
+``extracted`` says the date it compared was read off a page by a model. Both are true, and
+printing only the first would let a date somebody's extractor misread present itself as
+arithmetic. The binder prints them side by side.
+
 **These run before the model passes.** The agent's instruction tells it that expiry and
 staleness findings will already be present with ``source="rule"`` and that it must not
 re-derive them, which is only true if they actually are. Running them first is what makes that
@@ -34,6 +40,7 @@ log = logging.getLogger("drawbridge.checks")
 
 STALE_REPORT_MONTHS = 12
 SEVERITIES = ("low", "medium", "high")
+DATE_SOURCES = ("extracted", "computed", "declared")
 
 STALENESS_GRADES = ((6, "low"), (24, "medium"))
 """Months past the currency threshold, and the severity each overrun earns.
@@ -94,6 +101,7 @@ def _certificate_checks(review_id: str, doc: DocumentFacts, *, today: date) -> l
                 f"No expiry date could be established for the certificate in {doc.name}. "
                 "A certificate whose validity cannot be determined is not evidence of one.",
                 evidence_ref=doc.doc_ref,
+                date_source="extracted",
             )
         ]
 
@@ -108,6 +116,7 @@ def _certificate_checks(review_id: str, doc: DocumentFacts, *, today: date) -> l
                 f"{doc.cert_expiry.isoformat()}, {days} days before this review. "
                 "The vendor presented it as current evidence.",
                 evidence_ref=doc.doc_ref,
+                date_source="extracted",
             )
         ]
     return []
@@ -131,6 +140,7 @@ def _report_checks(
                 f"No report period could be established for {doc.name}. An audit report with "
                 "no stated period cannot be shown to be current.",
                 evidence_ref=doc.doc_ref,
+                date_source="extracted",
             )
         )
     else:
@@ -147,6 +157,7 @@ def _report_checks(
                     f"and {overrun} month(s) beyond the {STALE_REPORT_MONTHS}-month currency "
                     "threshold.",
                     evidence_ref=doc.doc_ref,
+                    date_source="extracted",
                 )
             )
 
@@ -202,13 +213,20 @@ def rule_finding(
     summary: str,
     *,
     evidence_ref: str | None = None,
+    date_source: str | None = None,
 ) -> Finding:
     """Construct a finding labelled ``source="rule"``.
 
+    Args:
+        date_source: where the date this finding turns on came from, for a finding that turns
+            on one. ``source="rule"`` describes the conclusion; on a date comparison the input
+            is usually a date a model read off a page, and attributing the two separately is
+            what stops the provenance label claiming more than it proves.
+
     Raises:
-        ValueError: when ``domain`` is not a rubric domain or ``severity`` is not one of low,
-            medium or high. A finding with an unmapped domain would silently fail to reach
-            the score.
+        ValueError: when ``domain`` is not a rubric domain, ``severity`` is not one of low,
+            medium or high, or ``date_source`` is outside the vocabulary. A finding with an
+            unmapped domain would silently fail to reach the score.
     """
     if domain not in RUBRIC_DOMAINS:
         raise ValueError(
@@ -217,6 +235,10 @@ def rule_finding(
         )
     if severity not in SEVERITIES:
         raise ValueError(f"{severity!r} is not a severity; expected one of {SEVERITIES}")
+    if date_source is not None and date_source not in DATE_SOURCES:
+        raise ValueError(
+            f"{date_source!r} is not a date source; expected one of {DATE_SOURCES}"
+        )
 
     return Finding(
         finding_id=f"{review_id}:rule:{_slug(summary)}",
@@ -224,6 +246,7 @@ def rule_finding(
         domain=domain,
         severity=severity,
         source="rule",
+        date_source=date_source,
         contradiction=False,
         summary=summary,
         evidence_ref=evidence_ref,

@@ -315,7 +315,12 @@ def test_the_nimbuswrite_chain_names_its_model_provider(review_id, db):
     assert "never been reviewed" in summaries
     assert "no data processing agreement" in summaries
     assert all(f.source == "rule" for f in findings)
-    assert len(APPROVED_VENDOR_REGISTER) == 9
+
+    # The absences are the fixture. A register that quietly grew one of these names would turn
+    # the headline finding into no finding at all, and every assertion above would still pass.
+    listed = {entry["name"] for entry in APPROVED_VENDOR_REGISTER}
+    assert "Veritas Lumen Models" not in listed
+    assert "Sendline Notifications" not in listed
 
 
 @emulator_required

@@ -49,6 +49,26 @@ Severity = Literal["low", "medium", "high"]
 FindingSource = Literal["rule", "model"]
 Provenance = Literal["human", "rule", "model_structured"]
 
+DateSource = Literal["extracted", "computed", "declared"]
+"""Where the date a finding turns on came from.
+
+``source="rule"`` says the *conclusion* is arithmetic. It says nothing about the input, and on
+a date comparison the input is usually a date a model read off a page — so a certificate-expiry
+finding labelled only ``rule`` reads as a stronger claim than it is, and it reads that way in
+the binder, where an auditor sees it. This field attributes the input:
+
+``extracted``   a model read the date out of the vendor's own document
+``declared``    a person or an internal system stated it — the approved-vendor register's own
+                status flag, the intake form
+``computed``    the code derived it, rather than reading it anywhere. A register row whose
+                review lapsed because ``review_valid_until`` is in the past is computed; the
+                same row with somebody's hand-set ``expired`` flag is declared, and an auditor
+                asking "did we work this out or did somebody mark it?" is asking for exactly
+                that distinction.
+
+The arithmetic is still the code's either way. Only the input is attributed.
+"""
+
 RUBRIC_DOMAINS = (
     "data_protection",
     "access_control",
@@ -145,6 +165,7 @@ class Finding(BaseModel):
     domain: str
     severity: Severity
     source: FindingSource
+    date_source: DateSource | None = None
     contradiction: bool = False
     summary: str
     evidence_ref: str | None = None

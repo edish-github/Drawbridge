@@ -24,7 +24,9 @@ Four findings, and the fourth-party domain is the only place they land:
     could make an unknown fourth party known by writing one document.
 ``register_review_expired``
     On the register, but the review the organisation ran has lapsed. Lower severity than never
-    having reviewed them — somebody did the work once and the paperwork went stale.
+    having reviewed them — somebody did the work once and the paperwork went stale. Carries a
+    ``date_source`` of ``computed`` or ``declared`` depending on whether the code worked the
+    lapse out or the register said so.
 ``no_dpa_claimed``
     A customer-data processor the vendor's own list says there is no agreement with. Aggregated
     into one finding per vendor rather than one per subprocessor, and it fires only on a stated
@@ -264,11 +266,21 @@ def _unknown(review_id: str, processors: list[Subprocessor], ref: str | None) ->
 
 
 def _lapsed(review_id: str, processors: list[Subprocessor], ref: str | None) -> list[Finding]:
-    """A company the organisation reviewed once, whose review has since lapsed."""
+    """A company the organisation reviewed once, whose review has since lapsed.
+
+    The date this turns on is the register's, not the vendor's, and it is attributed on which
+    of the two ways it was reached: ``computed`` when the code worked the lapse out from
+    ``review_valid_until``, ``declared`` when the register row's own status field already said
+    so. An auditor asking "did we work this out or did somebody mark it?" is asking for exactly
+    that, and a hand-set flag is only as current as the last person who touched it.
+    """
     findings = []
     for sub in processors:
         if not sub.known_to_org or sub.register_status == STATUS_CURRENT:
             continue
+        lapsed_by_date = (
+            sub.register_status == STATUS_EXPIRED and sub.review_valid_until is not None
+        )
         when = (
             f" on {sub.review_valid_until.isoformat()}" if sub.review_valid_until else ""
         )
@@ -281,6 +293,7 @@ def _lapsed(review_id: str, processors: list[Subprocessor], ref: str | None) -> 
                 f"{sub.register_status}{when}, while it continues to receive customer data "
                 f"through this vendor. Purpose: {sub.purpose or 'not stated'}.",
                 evidence_ref=ref,
+                date_source="computed" if lapsed_by_date else "declared",
             )
         )
     return findings

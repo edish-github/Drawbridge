@@ -56,11 +56,15 @@ Rules:
 - Missing evidence is NOT a contradiction — it is a gap. Label it as such.
 - Do not speculate about intent. Report what the documents say.
 - Assign a severity to every finding, judged against these anchors:
-    high    a control the vendor claims is in place is contradicted by their own evidence,
-            or an exception covers privileged access or customer data
-    medium  a contradiction or gap on a non-privileged scope, or a claim that evidence
-            should support and does not
+    high    a control the vendor claims is in place is absent, ineffective or excepted in
+            their own evidence, or an exception covers privileged access or customer data
+    medium  a commitment, target or timeframe the vendor states, which their own evidence
+            shows was not met; a contradiction or gap on a non-privileged scope; or a claim
+            that evidence should support and does not
     low     a documentation, scope or date inconsistency with no direct control impact
+  A missed commitment is not an absent control: the difference between "we do not enforce
+  this" and "we did not meet our own target" is a whole anchor, and it is the difference
+  between the control and the promise about it.
   When a finding sits between two anchors, choose the lower one and say why in the summary.
 - Emit at most ONE finding for this claim. It is one question; it gets one answer.
 - Do not perform date arithmetic, certificate expiry checks or report-period staleness

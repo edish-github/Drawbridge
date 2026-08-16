@@ -146,13 +146,14 @@ def seed_vendor(slug: str, *, clock=None) -> str:
 
 
 APPROVED_VENDOR_REGISTER = (
-    # The internal system the Evidence agent queries. Nine companies the organisation has
+    # The internal system the Evidence agent queries. Eight companies the organisation has
     # already put through a review of its own, with the dates those reviews are good until.
     #
-    # Two names are deliberately absent, and the absences are the feature. Veritas Lumen Models
-    # receives NimbusWrite's customer text and nobody here has ever heard of it; Pathview
-    # Telemetry is the quieter version of the same thing, and raises nothing because it receives
-    # only aggregate counters.
+    # Three names are deliberately absent, and the absences are the feature. Sendline
+    # Notifications carries DataDynamo's delivery notifications and every address in them, and
+    # nobody here has ever reviewed it. Veritas Lumen Models receives NimbusWrite's customer
+    # text, same shape. Pathview Telemetry is the quiet control case: also absent, and raises
+    # nothing, because it receives only aggregate counters.
     #
     # Wayfarer Geocoding is on the register with a review that lapsed in September 2025 — a
     # company somebody did the work on once, whose paperwork went stale while it carried on
@@ -169,13 +170,6 @@ APPROVED_VENDOR_REGISTER = (
         "last_review_id": "rv-2023-0442",
         "review_status": "current",
         "review_valid_until": "2025-09-30",
-        "jurisdictions": ["EU"],
-    },
-    {
-        "name": "Sendline Notifications",
-        "last_review_id": "rv-2025-0019",
-        "review_status": "current",
-        "review_valid_until": "2027-07-31",
         "jurisdictions": ["EU"],
     },
     {

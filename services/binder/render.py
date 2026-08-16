@@ -121,6 +121,7 @@ tr:last-child td { border-bottom: 0; }
 .pill-medium { color: var(--warn); border-color: var(--warn); }
 .pill-low { color: var(--mute); border-color: var(--mute); }
 .pill-contradiction { color: var(--danger); border-color: var(--danger); }
+.pill-date { color: var(--mute); border-color: var(--mute); }
 .pill-untrusted { color: var(--danger); border-color: var(--danger); }
 .pill-clean { color: var(--ok); border-color: var(--ok); }
 /* A retrieved passage is a whole chunk, printed in full: an auditor checking a citation needs
@@ -493,6 +494,7 @@ def _section_4_findings(binder: Binder) -> str:
             f"<div class='goal'>{_text(finding.get('summary'))}</div>"
             f"<div class='meta mono'>{_text(finding.get('domain'))} · "
             f"{_severity_pill(finding)} {_source_pill(finding)}"
+            f"{_date_source_pill(finding)}"
             f"{_contradiction_pill(finding)} · "
             f"claim {_text(finding.get('claim_ref') or '—')}</div>"
             f"{provenance}</div>"
@@ -505,6 +507,13 @@ def _section_4_findings(binder: Binder) -> str:
   <span class="pill pill-model">model</span> means it is judgement over a retrieved passage. A
   contradiction cites the passage that refutes the claim, with the chunk and page it came
   from.</p>
+  <p>A finding that turns on a date carries a second label for the date itself.
+  <span class="pill pill-date">date extracted</span> means a model read it off the page,
+  <span class="pill pill-date">date declared</span> means a person or an internal system stated
+  it, and <span class="pill pill-date">date computed</span> means this system derived it. The
+  comparison is arithmetic in all three cases; what changes is how much the input is worth, and
+  an expired certificate whose expiry date was read by a model is not the same evidence as one
+  whose expiry date was typed by a certification body.</p>
   {"".join(blocks) if blocks else _empty("No findings were recorded for this review.")}
   {_chain(binder)}
 </section>"""
@@ -649,6 +658,18 @@ def _contradiction_pill(finding: dict) -> str:
     if not finding.get("contradiction"):
         return ""
     return ' <span class="pill pill-contradiction">contradiction</span>'
+
+
+def _date_source_pill(finding: dict) -> str:
+    """Where the date a finding turns on came from, printed beside the finding's provenance.
+
+    Absent on a finding that turns on no date, which is most of them. Printing "date: n/a"
+    everywhere would bury the four places the distinction actually matters.
+    """
+    origin = finding.get("date_source")
+    if not origin:
+        return ""
+    return f' <span class="pill pill-date">date {_text(origin)}</span>'
 
 
 def _excerpt(excerpt) -> str:

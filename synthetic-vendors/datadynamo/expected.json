@@ -52,11 +52,11 @@
     {
       "id": "breach_disclosure_contradiction",
       "domain": "incident_response",
-      "severity": "high",
+      "severity": "medium",
       "contradiction": true,
       "source": "model",
       "claim_ref": "IR01",
-      "note": "The questionnaire claims a 24-hour notification window. The incident sheet records 9 days from detection to disclosure."
+      "note": "The questionnaire claims a 24-hour notification window. The incident sheet records 9 days from detection to disclosure. Medium on the commitment anchor rather than high: the disclosure process exists and ran, and what the evidence contradicts is the timeframe the vendor committed to, not the presence of the control."
     },
     {
       "id": "report_period_stale",
@@ -65,6 +65,15 @@
       "contradiction": false,
       "source": "rule",
       "note": "The report period ended 30 June 2025, one month past the 12-month currency threshold. Severity is graded on the overrun: a report a month out of date and one three years out of date are not the same finding, and nothing in this report records a control that failed."
+    },
+    {
+      "id": "sendline_unknown_fourth_party",
+      "domain": "subprocessors",
+      "severity": "medium",
+      "contradiction": false,
+      "source": "rule",
+      "note": "Sendline Notifications receives recipient names, phone numbers, email addresses and delivery windows for every shipment DataDynamo handles, and it is not on this organisation's approved-vendor register. Nobody here has reviewed it and there is no record of anything ever having been signed with it. A set difference against an internal system, so the finding is source=rule and reproducible without a model.",
+      "raises_beat": "fourth_party_gap"
     },
     {
       "id": "wayfarer_register_review_expired",
@@ -100,12 +109,14 @@
   "subprocessors": {
     "extracted_count": 4,
     "processing_customer_data": 3,
-    "unknown_to_register": 0,
+    "unknown_to_register": [
+      "Sendline Notifications"
+    ],
     "register_review_expired": [
       "Wayfarer Geocoding"
     ],
     "jurisdictions_outside_residency": 0,
-    "note": "Every subprocessor is on the register and every one is in the EU, which the intake form requires. The only gap is a review that lapsed \u2014 the quiet version of the fourth-party finding, and the one an analyst would otherwise never look for."
+    "note": "Two gaps of different kinds, which is why this vendor carries the beat. Sendline Notifications receives every recipient address DataDynamo handles and has never been reviewed here at all; Wayfarer Geocoding was reviewed once and the paperwork lapsed. Everything is inside the EU, so residency raises nothing. The headline case fires on a vendor that completes a review locally, which is what makes it demonstrable rather than described."
   },
   "assertions": [
     "The MFA contradiction is present with domain=access_control, severity=high, contradiction=true and source=model.",
@@ -117,6 +128,7 @@
     "A follow-up outstanding on DP01 does not stop the review reaching the coverage threshold.",
     "The band is conditional, and the score sits at least four points inside it at both ends.",
     "No Adversarial Conduct flag is raised.",
-    "The fourth-party diff runs against the approved-vendor register and raises exactly one finding, source=rule."
+    "The fourth-party diff runs against the approved-vendor register and raises two findings, both source=rule.",
+    "The fourth_party_gap beat fires, naming Sendline Notifications and what it receives."
   ]
 }
