@@ -184,6 +184,36 @@ third threat Model Armor names, and the only one no other path in this system co
 every other untrusted input arrives from the vendor. In local mode the stub is untrusted by
 construction, so fetched content is refused and the sweep runs on expiry math alone.
 
+## A15 · Conditions live in the ledger, not in durable memory
+
+**Documents affected:** the memory-hierarchy description, wherever the conditions attached to a
+conditional approval are listed among the things durable memory carries between reviews.
+
+**What the code does:** ``Approval.conditions`` holds them in the approvals collection. The
+dossier records an ``approval_condition`` note saying conditions were attached and naming the
+review; ``recall._conditions`` resolves the text from that review's approval record.
+
+**Why:** a condition is a sentence a person typed, and the structured-write guard rejects it at
+thirteen words — correctly. The guard was not widened. Durable memory is recalled into a
+planning prompt *before any screening has run in the new review*, which makes it the one place
+content from an earlier review could reach a model without passing a detector in this one, and
+the fix for something that does not fit is a note type that does, not a looser rule.
+
+## A16 · A second review carries a domain, not a question
+
+**Documents affected:** anywhere the memory payoff is described as "questions already answered
+are not asked again".
+
+**What the code does:** a question is carried only when its answer was rated ``usable``, its text
+is unchanged, **and the prior review recorded no finding in its domain**. A vendor carrying a
+conduct flag carries nothing at all.
+
+**Why:** the first two conditions alone carried fifty of DataDynamo's fifty-four questions, which
+is a rubber stamp rather than a review. The domain gate is what makes it a saving rather than a
+shortcut: the finding is the reason the review happened, and asking around it would be the worst
+possible economy. Measured: 43 asked instead of 54, and the eleven carried are the only domain
+that came back clean.
+
 ## A06 · Review-state ownership is narrowed to forward transitions
 
 **Documents affected:** anywhere the Orchestrator is described as the only component that

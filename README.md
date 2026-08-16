@@ -117,6 +117,40 @@ on its cover. Run the demo without it to watch the refusal.
 
 Replay either one: same Trust Score, same findings, same re-tier, idempotent skips logged.
 
+## The fourth-party chain
+
+The only place an agent queries an internal system rather than reading a vendor's document. The
+model extracts the subprocessor table; a set difference against
+[`approved_vendors`](infra/iam/permission-matrix.yaml) — this organisation's own register, with
+readers and no writer — decides what it means. Four findings, all `source=rule`: a company
+receiving customer data that nobody here reviewed, one whose review has lapsed, one the vendor's
+list says there is no agreement with, and customer data reaching a region the intake form ruled
+out.
+
+NimbusWrite's model provider is the case that lands: it receives your customers' text, and you
+have never reviewed it or signed anything with it. The chain renders on the review timeline and
+in binder section 4, as a nested list with the unknown nodes marked.
+
+## The second review
+
+```
+make demo-second
+```
+
+Runs DataDynamo end to end, closes it with a named person attaching two conditions, then opens a
+second review six months later that already knows the outcome, the band, the conditions, the
+certificate that expired, the contact, and how usable every answer was.
+
+Two things change because of it. **Scrutiny never falls**: the tier starts where the last review
+ended, so a second intake form that is more modest than the first buys nothing. And **43
+questions are asked instead of 54** — the eleven carried are the only domain that came back
+clean, because a domain that produced a finding is asked again in full.
+
+Nothing prose-shaped carries. The conditions are sentences a person typed, so they live on the
+approval record and the dossier holds the pointer: durable memory is recalled into a planning
+prompt before any screening has run in the new review, which is the one place content from an
+earlier review could reach a model without passing a detector in this one.
+
 ## Kill it mid-send
 
 ```
