@@ -1,0 +1,71 @@
+{
+  "vendor_id": "datadynamo",
+  "purpose": "Measure this system's own miss rate on contradictions it was not built to catch.",
+  "why_it_is_separate": "These claims and passages are DataDynamo's — same company, same voice, same documents — and they are deliberately not in questionnaire_answers.json or in the evidence folder. A claim in the pack proper is a claim the review asks, and every one of these would move the Trust Score and the three-band calibration with it. The measurement has to be able to grow without the demo moving, so the corpus is read only by scripts/miss_rate.py and by nothing in the fleet.",
+
+  "what_makes_these_hard": "The existing contradictions are loud: a 24-hour commitment against a 9-day disclosure, organisation-wide MFA against an unremediated exception naming administrative access. Both are two numbers or two plain statements in direct opposition, and a model that missed them would be broken rather than imprecise. Every case below is a contradiction that survives a careless reading — the words agree and the meanings do not.",
+
+  "detection_is_not_severity": "A case is caught when the model raises a finding at all. What severity it assigns is measured separately by scripts/severity_sweep.py, because a miss and a misgrade are different failures with different repairs.",
+
+  "cases": [
+    {
+      "id": "SC01",
+      "technique": "scope qualifier narrowing the control",
+      "domain": "data_protection",
+      "claim": "All customer data is encrypted at rest using AES-256 with keys rotated every 90 days, across our entire platform.",
+      "passage": "Encryption at rest using platform-managed AES-256 keys is applied to the Enterprise tier. Standard-tier customer data resides on the shared cluster, where encryption at rest is provided by the underlying storage service and key rotation is managed by that provider on its own schedule.",
+      "must_flag": true,
+      "note": "Nothing here is false. Encryption at rest is real, AES-256 is real, and the claim says 'across our entire platform' while the evidence describes two tiers with two different arrangements and one of them with no stated rotation interval. The word doing the work is 'entire', and it is in the claim rather than in the evidence.",
+      "failure_mode_if_missed": "The buyer is on the standard tier. The finding that matters is the one about the tier they are buying, and a review that reads 'encryption at rest: yes' has answered a question nobody asked."
+    },
+    {
+      "id": "SC02",
+      "technique": "exception in an appendix rather than in the exception notes",
+      "domain": "access_control",
+      "claim": "Joiner, mover and leaver processes are automated and access is revoked within 24 hours of a leaver's last working day.",
+      "passage": "Appendix B — Supplementary testing observations. Not carried into Section 5. B.4: Leaver deprovisioning was tested for 25 departures. Twenty-two were revoked within the stated window. Three accounts belonging to contractors engaged through the platform partner programme remained active for between 6 and 31 days after the engagement end date recorded in the partner system. Contractor accounts are outside the automated joiner-mover-leaver workflow.",
+      "must_flag": true,
+      "note": "The system's own prompt tells the model that exceptions live in exception notes, because that is where the synthetic packs put them. This one is in an appendix explicitly marked as not carried into Section 5, which is exactly how a real report keeps an observation out of the exception list without omitting it.",
+      "failure_mode_if_missed": "Every report has appendices and the ones worth reading are the ones the body does not reference. A reviewer that only reads exception notes is a reviewer that can be routed around by formatting."
+    },
+    {
+      "id": "SC03",
+      "technique": "true when written, false now",
+      "domain": "compliance_posture",
+      "claim": "All staff complete mandatory security awareness training annually, and completion stood at 100% at our most recent measurement.",
+      "passage": "Security awareness training completion was 100% as at 31 March 2025, measured against the headcount on that date. The programme operates on an annual cycle with a single enrolment window each March. Headcount grew from 180 to 265 during the reporting period.",
+      "must_flag": true,
+      "note": "Both sentences are true and they are true about different populations. A single March enrolment window and 85 people hired after it means the 100% figure describes the people who were there in March, and the claim presents it as the current state without saying so.",
+      "failure_mode_if_missed": "A date-anchored claim read as a present-tense one. The check that would catch it deterministically does not exist, because the arithmetic here is about a population rather than about a date, and there is nothing for a date comparison to compare."
+    },
+    {
+      "id": "SC04",
+      "technique": "planned, described as implemented",
+      "domain": "incident_response",
+      "claim": "We run a documented incident response plan with defined severity levels, and we test it through tabletop exercises.",
+      "passage": "An incident response plan with four defined severity levels is documented and was provided to the auditors. Management has established a tabletop exercise programme and the first exercise is scheduled for the quarter following the reporting period. No exercise had been conducted as at the period end date.",
+      "must_flag": true,
+      "note": "The plan exists, the severity levels exist, and the programme exists — as a programme. The claim's verb is 'we test it'; the evidence's verb is 'is scheduled for'. One word apart and a whole control apart, which is why this is the case most likely to be read as agreement.",
+      "failure_mode_if_missed": "An untested plan scores the same as a tested one. This is the single most common shape of vendor overstatement in the evidence file this project was scoped from, and the one an analyst says they always have to check by hand."
+    },
+    {
+      "id": "SC05",
+      "technique": "cadence stated as outcome",
+      "domain": "business_continuity",
+      "claim": "Backups are taken continuously and restore testing is performed quarterly.",
+      "passage": "Backup restore testing is scheduled quarterly. Two of the four scheduled tests in the period were completed. The remaining two were deferred; the reasons for deferral were not documented and no compensating test was performed.",
+      "must_flag": true,
+      "note": "Same shape as SC04 and a different register: here the claim states a cadence that the evidence confirms as a schedule and contradicts as an outcome. Included as a pair with SC04 so a miss on one and a catch on the other says something about which wording defeats the model rather than about the technique class as a whole.",
+      "failure_mode_if_missed": "Half the tests were not run and nobody wrote down why. That is a finding whether or not the schedule exists."
+    },
+    {
+      "id": "SC06",
+      "technique": "control genuinely in place",
+      "domain": "data_protection",
+      "claim": "Customer data is deleted within 30 days of contract termination, and we can evidence deletion on request.",
+      "passage": "Deletion on termination was tested for eight terminated contracts. All eight were deleted within the 30-day contractual window, with deletion certificates issued and retained. Certificate retention is 7 years.",
+      "must_flag": false,
+      "note": "The control. Written in the same register as the five above and pointing the other way, because a harness that only measures misses will reward a model that flags everything — and a cross-examiner that flags everything is a cross-examiner nobody keeps. A finding raised here is a false positive and is counted as one."
+    }
+  ]
+}

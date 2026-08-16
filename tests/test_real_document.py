@@ -24,6 +24,7 @@ verifies its checksum; without it every test here skips, naming the command.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 
@@ -36,6 +37,7 @@ from shared.extraction import extract
 from tests.conftest import emulator_required
 
 ENTRY = next(e for e in sources() if e["id"] == "nara-fisma-2024")
+MEASURED = SOURCES.parent / "measured.json"
 
 fetched = pytest.mark.skipif(
     not present(ENTRY),
@@ -48,8 +50,9 @@ fetched = pytest.mark.skipif(
 live_model = pytest.mark.skipif(
     not os.getenv("DRAWBRIDGE_MEASURE_EXTRACTION"),
     reason=(
-        "spends live model quota against a 20-request daily cap. Set "
-        "DRAWBRIDGE_MEASURE_EXTRACTION=1 to run the measurement."
+        "spends live model quota against a 20-request daily cap. Run it with "
+        "DRAWBRIDGE_MEASURE_EXTRACTION=1 and a real GEMINI_API_KEY exported — conftest sets a "
+        "placeholder key for the suite, and setdefault means an exported one wins."
     ),
 )
 
@@ -168,6 +171,18 @@ def test_what_the_extractor_reads_off_a_real_report(review_id, text):
         source_stamps=stamps_for(review_id, [origin]),
     )
     facts = result.parsed
+
+    # Written before the assertions, so a call that was spent is a call that was recorded. The
+    # first live run of this test passed and its field values were lost to the next traceback,
+    # which on a twenty-a-day cap is an expensive way to learn to write the file first.
+    MEASURED.write_text(
+        json.dumps(
+            {"document": ENTRY["id"], "sent_chars": min(len(text), MAX_DOCUMENT_CHARS)}
+            | facts.model_dump(mode="json"),
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
     # Recorded, not wished for. See EXTRACTION-NOTES.md for the run these came from.
     assert facts.auditor and "Sikich" in facts.auditor

@@ -12,12 +12,16 @@ The document is not in this repository and the reason is in `SOURCES.yaml`. Run
 asserts every number below.
 
 **What was measured and what was not.** The structural half — text extraction, the truncation
-window, chunking — ran and is recorded here in full. The one live model call did not: the
-Gemini credential in `.env` is rejected with `API_KEY_INVALID`, so `test_what_the_extractor_
-reads_off_a_real_report` is written, wired through the real router with a real stamp, and
-skipped behind `DRAWBRIDGE_MEASURE_EXTRACTION=1`. It is a one-command measurement the day the
-credential is replaced. The three findings below needed no model, and they are the substantive
-ones.
+window, chunking — ran and is recorded here in full; it needed no model, and it is where the
+three findings are. The live half ran **once and passed**: the extractor named Sikich as the
+auditor, returned a scope naming the information security programme, and correctly returned no
+certificate expiry for a document that is not a certificate. What it returns for `opinion` and
+`report_period_end` is still unmeasured — the day's twentieth free-tier request was spent
+before those values were captured, and the test now writes `measured.json` before it asserts
+anything so a spent call is never an unrecorded one again.
+
+Run it with `DRAWBRIDGE_MEASURE_EXTRACTION=1` and a real `GEMINI_API_KEY` exported; the suite's
+conftest sets a placeholder key by `setdefault`, so an exported one wins.
 
 ---
 
@@ -78,7 +82,10 @@ The period is prose rather than a field, and there are two of them:
 > fieldwork from November 2023 to July 2024.
 
 A currency check wants the first. The second is a different range for the same document, sitting
-in the next sentence, and nothing in the prompt tells a model which is which.
+in the next sentence, and nothing in the prompt tells a model which is which. **Which one the
+extractor returns is the open question** — it is the field `report_period_stale` compares
+against, so getting it wrong moves a finding's severity, and it is the first thing to read out
+of `measured.json` on the next run.
 
 ---
 
@@ -88,6 +95,9 @@ Nothing yet, deliberately. All three are recorded and asserted; none is patched,
 them are design decisions rather than constants and the third is a measurement the credential
 blocks. In descending order of what they cost:
 
+0. **Finish the live measurement.** `opinion` and `report_period_end` are one command and one
+   free-tier request away, and both feed findings. The first run proved the auditor and the
+   scope; it did not prove the two fields a date check depends on.
 1. **The truncation window** is a correctness problem on any document over ~25,000 characters,
    and real assurance reports routinely are. It is now the top of the list, above anything on
    the cloud-gaps list, because it needs no project to fix and no project to have found.
