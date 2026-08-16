@@ -136,6 +136,16 @@ class Demo:
     def ctx(self) -> AgentContext:
         return AgentContext(review_id=self.review_id, agent="demo", trace_id=uuid.uuid4().hex)
 
+    def adopt(self, review_id: str, fired: list[str]) -> None:
+        """Continue a review a previous process opened.
+
+        The seam the crash demo resumes through. Beats that fired before the crash are carried
+        forward rather than re-asserted, because a beat is a thing that happened once — the
+        restart proves it is still true by not doing it again, not by doing it again.
+        """
+        self.review_id = review_id
+        self.fired = list(fired)
+
 
 def run(vendor: str, *, compress: int = 1, fixtures_only: bool = False) -> list[str]:
     """Run the scenario and return the beats that fired, in order.
@@ -186,10 +196,25 @@ def _run(vendor: str) -> list[str]:
     """The scripted run itself. Identical whether the answers come from a model or a fixture."""
     announce_fixtures()
     demo = Demo(vendor)
-    profile = load_vendor(vendor)["profile"]
 
-    # --- intake ---------------------------------------------------------------------------
-    seed_vendor(vendor)
+    open_and_plan(demo)
+    release_the_contact_gate(demo)
+    confirm_first_contact(demo)
+    to_a_decision(demo)
+
+    return demo.fired
+
+
+# The run is in four parts rather than one function so the crash demo can stop between two of
+# them, die, and resume from the next. A resumable system whose own demo script cannot be
+# resumed would be an odd thing to claim.
+
+
+def open_and_plan(demo: Demo) -> None:
+    """Intake through the checkpointed plan."""
+    profile = load_vendor(demo.vendor)["profile"]
+
+    seed_vendor(demo.vendor)
     demo.review_id = open_review(profile)
     demo.beat("intake")
 
@@ -197,17 +222,31 @@ def _run(vendor: str) -> list[str]:
     review = demo.review()
     demo.require("plan_ready", review.state in (ReviewState.QUESTIONNAIRE_OUT, ReviewState.GATED))
 
-    # --- the contact gate -------------------------------------------------------------------
+
+def release_the_contact_gate(demo: Demo) -> None:
+    """The P1 refusal, and the human approval that clears it."""
     review = demo.review()
     demo.require(
         "contact_gate_parked",
         review.state is ReviewState.GATED and review.gate_scope == "contact",
     )
-
     approve(demo.review_id, scope="contact")
+
+
+def confirm_first_contact(demo: Demo) -> None:
+    """Drain the release and assert the vendor was emailed exactly once.
+
+    Both halves matter on a resume: the drain is where a restarted worker replays the send and
+    the guards refuse it, and the count is the proof that they did.
+    """
     demo.drain()
     demo.require("contact_gate_released", demo.review().state is ReviewState.QUESTIONNAIRE_OUT)
     demo.require("questionnaire_sent", inbox_count(demo.review_id, "questionnaire") == 1)
+
+
+def to_a_decision(demo: Demo) -> list[str]:
+    """Replies, evidence, the score, the decision gate and the binder."""
+    vendor = demo.vendor
 
     # --- replies --------------------------------------------------------------------------
     opening_tier = demo.review().tier

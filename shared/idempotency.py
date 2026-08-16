@@ -80,12 +80,21 @@ def key_for_review(review, step_id: str, *, inherited: dict[str, str] | None = N
     return key_for(review.review_id, review.plan_version, step_id)
 
 
-def once(idem_key: str, ctx, fn: Callable[..., Any], *args, **kwargs) -> Any:
+def once(idem_key: str, ctx, fn: Callable[..., Any], *args, claim: Any = None, **kwargs) -> Any:
     """Execute ``fn`` at most once across all retries, restarts and redeliveries.
 
     Claims the key in a Firestore transaction, runs the effect, then records the result. A
     second call with the same key returns the recorded result and logs a visible skip — the
     ``idempotency SKIP`` line is a demo asset, not just a log entry.
+
+    Args:
+        claim: what this step is about to do, recorded with the claim rather than with the
+            result. Two things need it. An operator reconciling a crashed step is looking at a
+            marker that says a key was claimed and nothing else, and "about to email these
+            thirty questions to this address" is the difference between a decision and a guess.
+            And when they confirm it, ``confirm`` promotes this to the result — so a step whose
+            process died before it could record what it did is still replayable without the
+            caller having to re-derive it.
 
     Raises:
         ReconciliationRequired: when an ``in_progress`` record older than
@@ -101,7 +110,7 @@ def once(idem_key: str, ctx, fn: Callable[..., Any], *args, **kwargs) -> Any:
     source = getattr(ctx, "agent", "unknown")
 
     @firestore.transactional
-    def claim(tx) -> dict | None:
+    def claim_the_key(tx) -> dict | None:
         snap = ref.get(transaction=tx)
         if snap.exists:
             return snap.to_dict()
@@ -112,11 +121,12 @@ def once(idem_key: str, ctx, fn: Callable[..., Any], *args, **kwargs) -> Any:
                 "ts": datetime.now(UTC).isoformat(),
                 "source": source,
                 "review_id": getattr(ctx, "review_id", None),
+                "claim": _serialise(claim),
             },
         )
         return None
 
-    prior = claim(db.transaction())
+    prior = claim_the_key(db.transaction())
 
     if prior is not None:
         if prior.get("status") == STATUS_DONE:
@@ -217,6 +227,55 @@ def reconcile(review_id: str, *, older_than_seconds: int = RECONCILE_AFTER_SECON
         if older_than_seconds <= 0 or _older_than(data.get("ts", ""), older_than_seconds):
             stale.append(doc.id)
     return stale
+
+
+def confirm(idem_key: str, *, confirmed_by: str, result: Any = None) -> dict:
+    """Close a claimed-but-incomplete key on a human's word that the effect did happen.
+
+    The other half of "flag for confirmation". A crashed worker leaves an ``in_progress``
+    marker, and nothing in the system can tell from the outside whether the email left the
+    building — so a person looks, decides, and records the decision here. Until they do, the
+    step is refused rather than repeated, which is the conservative direction.
+
+    Only ever moves a claim to ``done``. There is deliberately no "it did not happen, run it
+    again" here: releasing a claim for an effect that might have occurred is the operation that
+    sends the second email, and if an operator has established it did not happen then a new
+    step under a new key is the honest way to redo it.
+
+    Raises:
+        ReconciliationRequired: when the key was never claimed. Confirming an effect nobody
+            attempted would write a done marker that silently skips real work later.
+    """
+    ref = firestore_client().collection(COLLECTION).document(idem_key)
+    snap = ref.get()
+    if not snap.exists:
+        raise ReconciliationRequired(idem_key, "", "nobody")
+
+    prior = snap.to_dict() or {}
+    if prior.get("status") == STATUS_DONE:
+        log.info("idempotency ALREADY DONE %s — nothing to confirm", idem_key)
+        return prior
+
+    # The claim recorded what the step was about to do. Promoting it is what lets a replay
+    # after confirmation hand the caller back the same thing a completed run would have — the
+    # question ids that went out, in the case this exists for.
+    restored = result if result is not None else prior.get("result") or prior.get("claim")
+
+    ref.update(
+        {
+            "status": STATUS_DONE,
+            "result": _serialise(restored),
+            "done_ts": datetime.now(UTC),
+            "confirmed_by": confirmed_by,
+        }
+    )
+    log.warning(
+        "idempotency CONFIRMED %s — %s confirmed the effect happened; the step will be skipped "
+        "on the next replay rather than re-run",
+        idem_key,
+        confirmed_by,
+    )
+    return ref.get().to_dict() or {}
 
 
 def record_status(idem_key: str) -> dict | None:

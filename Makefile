@@ -59,6 +59,12 @@ demo-fixtures:  ## run the same scenario with fixture answers: free, determinist
 	$(UNSCREENED) $(PYTHON) -m scenarios.demo_runner --vendor $(or $(VENDOR),datadynamo) \
 		--fixtures-only
 
+# Pillar three, as a beat rather than a claim. Two real processes: the first is SIGKILLed with
+# the questionnaire already sent and the checkpoint not yet written, the second finishes the
+# review. The vendor is emailed once across both.
+demo-crash:     ## kill the worker mid-send, restart it, and finish the review
+	$(UNSCREENED) $(PYTHON) -m scenarios.crash_demo --vendor $(or $(VENDOR),datadynamo)
+
 binder:         ## render a review's audit binder to HTML (REVIEW=<id>)
 	$(PYTHON) -m services.binder.render --review-id $(REVIEW)
 

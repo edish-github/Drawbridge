@@ -185,6 +185,64 @@ def test_reconcile_waits_out_the_default_window_for_a_fresh_claim(review_id):
     assert reconcile(review_id, older_than_seconds=0) != []
 
 
+# --- Confirmation: the other half of "flag for confirmation" ---------------------------------
+
+
+@emulator_required
+def test_a_claim_records_what_the_step_was_about_to_do(review_id):
+    """An operator reconciling a crashed step is looking at a marker. "About to email these
+    questions to this address" is the difference between a decision and a guess."""
+    key = key_for(review_id, 1, "questionnaire_send:v1")
+
+    with pytest.raises(RuntimeError):
+        once(key, ctx(review_id), _fail, claim={"to": "v@example.test", "questions": ["DP01"]})
+
+    assert record_status(key)["claim"] == {"to": "v@example.test", "questions": ["DP01"]}
+
+
+@emulator_required
+def test_a_confirmed_claim_is_skipped_rather_than_re_run(review_id, db):
+    """The path out of reconciliation. A person establishes the email went out, and the next
+    replay skips the effect instead of repeating it."""
+    from shared.idempotency import confirm
+
+    run_worker(review_id, kill_at="after_claim")
+    key = key_for(review_id, 1, "questionnaire_send:v1")
+
+    confirm(key, confirmed_by="priya@example.test")
+    once(key, ctx(review_id), lambda: pytest.fail("the confirmed effect was repeated"))
+
+    assert record_status(key)["confirmed_by"] == "priya@example.test"
+
+
+@emulator_required
+def test_confirmation_hands_back_what_the_claim_recorded(review_id):
+    """A step whose process died before recording its result is still replayable, because the
+    claim said what it was about to do and confirmation promotes it."""
+    from shared.idempotency import confirm
+
+    key = key_for(review_id, 1, "questionnaire_send:v1")
+    with pytest.raises(RuntimeError):
+        once(key, ctx(review_id), _fail, claim={"questions": ["DP01", "AC01"]})
+
+    confirm(key, confirmed_by="priya@example.test")
+
+    assert once(key, ctx(review_id), lambda: None) == {"questions": ["DP01", "AC01"]}
+
+
+@emulator_required
+def test_an_effect_nobody_claimed_cannot_be_confirmed(review_id):
+    """A done marker for work nobody attempted would silently skip real work later."""
+    from shared.idempotency import confirm
+
+    with pytest.raises(ReconciliationRequired):
+        confirm(key_for(review_id, 1, "never_claimed:v1"), confirmed_by="priya@example.test")
+
+
+def _fail():
+    raise RuntimeError("the worker died here")
+
+
 @emulator_required
 def test_a_result_that_cannot_be_recorded_raises(review_id):
     """Recording a key as done without its result would make the next replay skip lost work."""

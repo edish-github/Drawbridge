@@ -242,11 +242,22 @@ def on_plan_ready(event: EventEnvelope, review: Review) -> None:
                 vendor=review.vendor_id,
                 approval_token=token,
             )
-            record_delivered(review.review_id, sent_ids)
-            return result
+            # The question ids travel with the recorded result rather than being written in
+            # here. Both guards hand the result back on a replay, so what went out is
+            # reconstructable from the ledger even when the process died between the send and
+            # the record — which is exactly when a lost record would make the next plan version
+            # ask the vendor all thirty questions a second time.
+            return {**result, "questions": sent_ids}
 
         try:
-            step(checkpoint_name, send_ctx, lambda: run_once(idem_key, send_ctx, deliver))
+            outcome = step(
+                checkpoint_name,
+                send_ctx,
+                lambda: run_once(
+                    idem_key, send_ctx, deliver, claim={"to": recipient, "questions": sent_ids}
+                ),
+            )
+            record_delivered(review.review_id, list((outcome or {}).get("questions") or []))
         except PolicyViolation as exc:
             park_at_contact_gate(review, reason=str(exc))
             record_decision(
@@ -307,13 +318,18 @@ def already_delivered(review_id: str) -> set[str]:
 
 
 def record_delivered(review_id: str, question_ids: list[str]) -> None:
-    """Record which questions have now gone out. Written inside the guarded send.
+    """Record which questions have now gone out.
 
-    Inside rather than after, so a delivery that happened is always recorded as having
-    happened: the alternative ordering loses the record on a crash between the send and the
-    write, and the next plan version would ask the vendor the same thirty questions again.
+    Driven by what the guarded send returned rather than written inside it, and a union rather
+    than an assignment, so the write is safe to repeat. A replay that skips the effect still
+    hands back the recorded result, which means the record survives a crash between the send
+    and this line — the case where losing it would have the next plan version ask the vendor
+    the same thirty questions again.
     """
     from google.cloud import firestore
+
+    if not question_ids:
+        return
 
     firestore_client().collection("reviews").document(review_id).set(
         {FIELD_SENT_QUESTIONS: firestore.ArrayUnion(question_ids)}, merge=True
