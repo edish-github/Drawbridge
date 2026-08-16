@@ -119,6 +119,20 @@ class _ClassifiedScope(BaseModel):
     classifications: list[ScopeClassification] = Field(default_factory=list)
 
 
+REKEYED_ON_REPLAN: frozenset[str] = frozenset({"questionnaire_send", "chase", "followup"})
+"""Steps that get a fresh idempotency key under a new plan, rather than inheriting the old one.
+
+Inheritance exists so completed work is not repeated, and for most steps the work under plan v2
+is the same work. These three are the exceptions: their effect is an outbound message, and a
+re-tier produces a *different* message — the questions the new domains added. Inheriting the old
+key would mean the vendor is never asked them, which is the failure inheritance was introduced to
+prevent, arriving from the other direction.
+
+Nothing is sent twice as a result. The second send carries only the questions the vendor has not
+already received, and the record of what has gone out is what enforces that.
+"""
+
+
 class TierChangeNotRecorded(Exception):
     """The tier change could not be written, so the re-plan was abandoned."""
 
@@ -398,7 +412,7 @@ def replan(review: Review, new_tier: int, *, ctx=None) -> Plan:
     inherited = {
         f"{step.name}:v1": key_for(review.review_id, review.plan_version, f"{step.name}:v1")
         for step in steps
-        if step.name in previous
+        if step.name in previous and step.name not in REKEYED_ON_REPLAN
     }
 
     plan = Plan(

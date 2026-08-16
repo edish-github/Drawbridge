@@ -290,15 +290,23 @@ def test_the_tier_is_recomputed_against_every_batch_not_the_newest(opened, db, c
 
 @emulator_required
 def test_carried_steps_inherit_their_old_idempotency_keys(opened):
-    """Work completed under plan v1 stays done under plan v2, so nothing is emailed twice."""
+    """Work completed under plan v1 stays done under plan v2, so it is not repeated."""
     plan = replan(opened, 1)
 
-    assert plan.inherited_keys["questionnaire_send:v1"] == (
-        f"{opened.review_id}:plan_v1:questionnaire_send:v1"
-    )
+    assert plan.inherited_keys["score:v1"] == f"{opened.review_id}:plan_v1:score:v1"
     assert "subprocessor_extract:v1" not in plan.inherited_keys, (
         "a step that is new at Tier 1 must not inherit a key from a plan that never ran it"
     )
+
+
+@emulator_required
+def test_the_send_step_is_rekeyed_rather_than_inherited(opened):
+    """The one carried step whose effect legitimately repeats. Inheriting its key would mean the
+    questions the re-tier added are never asked — the failure inheritance exists to prevent,
+    arriving from the other direction."""
+    plan = replan(opened, 1)
+
+    assert "questionnaire_send:v1" not in plan.inherited_keys
 
 
 @emulator_required
