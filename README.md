@@ -86,12 +86,14 @@ make demo-fixtures VENDOR=datadynamo
 make dashboard                      # in a second terminal: localhost:3000
 ```
 
-Fourteen beats, asserted rather than hoped for: intake → Tier 2 with a stated reason → plan
+Sixteen beats, asserted rather than hoped for: intake → Tier 2 with a stated reason → plan
 checkpointed → questionnaire built → **P1 refuses** → contact gate → approval → one email →
 replies parsed incrementally → **the vendor's own answer re-tiers the review to Tier 1** → the
-additional questions go out and nothing is asked twice → coverage reaches 93% → evidence
-retrieved and cross-examined → Trust Score 60, conditional, with a per-domain breakdown → memo →
-**decision gate** → approval → decided → audit binder rendered.
+additional questions go out and nothing is asked twice → **four vague answers are re-asked,
+quoting the vendor back** → coverage reaches 93% → evidence retrieved and cross-examined →
+Trust Score 66, conditional, with a per-domain breakdown → memo → **decision gate** → approval →
+decided → audit binder rendered → **the Watchdog sweeps and opens a linked re-review** on the
+certificate the review recorded as expired.
 
 `demo-fixtures` answers every model call from the vendor pack, so it is free, deterministic and
 runs in CI. `make demo` runs the same script against the live models and needs API quota — the
@@ -114,6 +116,45 @@ produces carries `unscreened_fixtures=true`, the worker prints a banner, and the
 on its cover. Run the demo without it to watch the refusal.
 
 Replay either one: same Trust Score, same findings, same re-tier, idempotent skips logged.
+
+## Kill it mid-send
+
+```
+make demo-crash
+```
+
+Three real processes. The first is driven to the instant the questionnaire has left the
+building and sent SIGKILL — uncatchable, so no handler runs and nothing tidies up. The kill
+lands in the narrowest window there is: after the email was sent and before its idempotency
+claim closed, which from the outside is indistinguishable from a worker that died a millisecond
+earlier and sent nothing.
+
+The second worker replays the send and **refuses** it, because a claim it cannot verify is not a
+claim it may repeat. A named person then confirms the email did go out, and the third worker
+replays it again, logs `idempotency SKIP`, banks the checkpoint and finishes the whole review.
+The vendor receives one questionnaire per plan version and none from the crash.
+
+That refusal is the honest answer to *why might a resumable agent order two laptops*.
+
+## Permission matrix
+
+Nine identities, scoped at collection level, generated into Firestore security rules from
+[`infra/iam/permission-matrix.yaml`](infra/iam/permission-matrix.yaml) by `make rules`. One
+source, two enforcement points: the table below and the ruleset the emulator loads cannot drift,
+and a test fails if the code names a collection the matrix does not.
+
+```
+make rules      # regenerate infra/firestore/firestore.rules
+make emulators  # start the emulator with them loaded
+pytest tests/test_iam_boundaries.py
+```
+
+**220 rows, all 22 collections and all 10 identities, checked against the running emulator** —
+43 permitted writes and 177 denials, each one a real `PermissionDenied` from a real rules
+evaluation rather than a claim in a document. What the emulator cannot check is IAM identity:
+that the Evidence agent genuinely *runs as* `sa-evidence` is a binding between a revision and a
+service account, and those tests stay skipped with that as their stated reason rather than a
+blanket "needs a project".
 
 ## The audit binder
 
@@ -157,11 +198,6 @@ in [`synthetic-vendors/nimbuswrite/README.md`](synthetic-vendors/nimbuswrite/REA
 `synthetic-vendors/injection-corpus/` holds the variant set used to measure the defence.
 
 TODO — the published injection-corpus detection table.
-
-## Permission matrix
-
-Nine identities, scoped at collection level. TODO — the table from handbook §3.2,
-rendered here as the deliverable it is.
 
 ## Teardown
 

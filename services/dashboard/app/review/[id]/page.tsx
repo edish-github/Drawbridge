@@ -181,7 +181,9 @@ function Entry({ entry }: { entry: Doc }) {
       ? `Re-tiered ${entry.from_tier} → ${entry.to_tier}`
       : kind === "policy_block"
         ? entry.line
-        : transitionOf(entry));
+        : kind === "watchdog_triage"
+          ? `Monitoring signal for review: ${entry.title}`
+          : transitionOf(entry));
 
   return (
     <div className="entry" data-kind={kind}>

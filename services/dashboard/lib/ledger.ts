@@ -107,8 +107,13 @@ export async function timeline(reviewId: string): Promise<Doc[]> {
   const entries: Doc[] = [
     ...events.map((e) => ({ kind: "event", at: e.ts ?? e.at ?? "", ...e })),
     ...reasoning.map((r) => ({ kind: "reasoning", ...r })),
+    // Three card kinds land on a review and all three are rendered. A watchdog triage card is
+    // the one that arrives after the review closed, which is exactly why it belongs on the same
+    // stream rather than in a separate list nobody opens.
     ...tierCards
-      .filter((c) => c.kind === "tier_change" || c.kind === "policy_block")
+      .filter((c) =>
+        ["tier_change", "policy_block", "watchdog_triage"].includes(String(c.kind)),
+      )
       .map((c) => ({ ...c, kind: c.kind })),
   ];
 

@@ -138,6 +138,52 @@ reaches a model except through `generate`, the router is the only place the clai
 true. Before this, *"no external content reaches a model without a verified stamp"* was in the
 architecture document, in the diagrams and in the narration, and was enforced nowhere.
 
+## A12 · Chases and follow-ups are composed from the bank, not by a model
+
+**Documents affected:** the Questionnaire agent's description, which lists composing chases and
+follow-ups among the fast model's jobs.
+
+**What the code does:** `chaser.py` and `followup.py` build their messages from the question
+bank and the review's own state. The vendor's answer is quoted verbatim in a re-ask; nothing is
+paraphrased and no model call is made on either path.
+
+**Why:** the bank already states the evidence each question requires, in the words the review
+was designed around, so a model would turn something exact into something approximate. It would
+do it by putting the vendor's own text into a prompt and mailing the result to a human, which is
+the tool-poisoning shape — spent for no gain. Both messages are also free and deterministic,
+which matters on a quota that caps the fast model at twenty requests a day.
+
+## A13 · A crashed step is confirmed by a person, not released for a retry
+
+**Documents affected:** anywhere reconciliation is described only as "surfaced for human
+confirmation", with no path onward.
+
+**What the code does:** `idempotency.confirm` closes a claimed-but-incomplete key on a named
+person's word that the effect happened. `once` now records a `claim` payload describing what the
+step was about to do, and confirmation promotes it to the result — so a step whose process died
+before it could record what it did is replayable without the caller re-deriving it. There is
+deliberately no "it did not happen, run it again": releasing a claim for an effect that might
+have occurred is the operation that sends the second email.
+
+**Why:** the guard already refused to repeat a crashed effect, which was correct and left the
+review stuck. `make demo-crash` walks the whole path — refusal, confirmation, replay, skip — and
+building it is what surfaced that the refusal had no exit.
+
+## A14 · The Watchdog screens what it fetches
+
+**Documents affected:** the P3 description, wherever the feed allowlist is presented as the
+control over fetched content.
+
+**What the code does:** `sources.fetch_feed_signals` screens every fetched body through
+`screen_text` before it is parsed into signals, and the `relevance` task is in
+`EXTERNAL_INPUT_TASKS`, so P2 verifies the stamp before the model is reached.
+
+**Why:** P3 bounds *where* the fleet fetches from and says nothing about what comes back. A
+compromised advisory page or an article quoting an attacker's own text is tool poisoning — the
+third threat Model Armor names, and the only one no other path in this system covers, because
+every other untrusted input arrives from the vendor. In local mode the stub is untrusted by
+construction, so fetched content is refused and the sweep runs on expiry math alone.
+
 ## A06 · Review-state ownership is narrowed to forward transitions
 
 **Documents affected:** anywhere the Orchestrator is described as the only component that

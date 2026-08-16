@@ -299,6 +299,9 @@ tr:last-child td {
 .entry[data-kind="policy_block"]::before {
   background: var(--danger);
 }
+.entry[data-kind="watchdog_triage"]::before {
+  background: var(--warn);
+}
 .entry summary {
   cursor: pointer;
   list-style: none;
