@@ -3,7 +3,9 @@
 Pub/Sub is at-least-once, so a duplicate is not an error condition, it is Tuesday. Every side
 effect — an email, a score write, an approval record — claims its key transactionally **before**
 the effect runs, so a crash mid-effect leaves an ``in_progress`` marker rather than an
-ambiguous silence.
+ambiguous silence. The one exception is a failure raised *before* dispatch — a gateway policy
+refusal — which is known not to have run the effect and so releases its claim instead of
+leaving one behind for a human to reconcile.
 
 Key derivation rule: ``review_id:plan_vN:step_id`` where ``step_id`` is deterministic from the
 workflow position (``questionnaire_send:v1``, ``chase:round2``, ``followup:q14:v1``) and never
@@ -90,7 +92,9 @@ def once(idem_key: str, ctx, fn: Callable[..., Any], *args, **kwargs) -> Any:
             ``RECONCILE_AFTER_SECONDS`` exists. The step is surfaced for a human to confirm; it
             is never re-run automatically.
         Exception: anything ``fn`` raises propagates unchanged, leaving the ``in_progress``
-            marker in place so the next attempt reconciles rather than duplicating.
+            marker in place so the next attempt reconciles rather than duplicating — unless the
+            exception declares ``effect_attempted = False``, which means the effect provably did
+            not run and the claim is released.
     """
     db = firestore_client()
     ref = db.collection(COLLECTION).document(idem_key)
@@ -142,7 +146,23 @@ def once(idem_key: str, ctx, fn: Callable[..., Any], *args, **kwargs) -> Any:
             )
         raise ReconciliationRequired(idem_key, claimed_at, source_of_claim)
 
-    result = fn(*args, **kwargs)
+    try:
+        result = fn(*args, **kwargs)
+    except Exception as exc:
+        # A failure that is *known* not to have attempted the effect releases its claim; a
+        # failure that might have half-happened keeps it. The only failures that qualify are
+        # the ones raised before dispatch — a gateway policy refusal is the case that matters,
+        # because the review parks at a gate and must be able to run the step once released.
+        # Everything else keeps the marker, which is what makes reconciliation conservative.
+        if getattr(exc, "effect_attempted", True) is False:
+            ref.delete()
+            log.info(
+                "idempotency RELEASED %s — %s refused before the effect; the step may run "
+                "again once the refusal is resolved",
+                idem_key,
+                type(exc).__name__,
+            )
+        raise
 
     ref.update(
         {

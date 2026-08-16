@@ -67,6 +67,16 @@ TOOL_REGISTRY: dict[str, Callable[..., Any]] = {}
 class PolicyViolation(Exception):
     """A gateway policy refused the call. Never caught to retry the same call unchanged."""
 
+    effect_attempted = False
+    """The refusal happened before dispatch, so the effect provably did not occur.
+
+    ``shared.idempotency.once`` reads this to release its claim rather than leaving an
+    ``in_progress`` marker. The distinction matters at the contact gate: a review parks because
+    P1 refused, a human approves, and the send must then be able to run. A claim left behind by
+    a refusal would meet the release path as an unreconciled step and refuse to send at all —
+    the gate would be releasable in the state machine and stuck in the guard.
+    """
+
     def __init__(self, policy: str, message: str) -> None:
         super().__init__(f"{policy}: {message}")
         self.policy = policy
@@ -158,30 +168,84 @@ def call_tool(tool_name: str, ctx, **kwargs) -> Any:
         return result
 
 
-def verify_approval_token(review_id: str, target: str, token: str | None = None) -> bool:
-    """Verify a human approval token against the public key. Verification only.
+def verify_approval_token(
+    review_id: str,
+    target: str,
+    token: str | None = None,
+    *,
+    scope: str = "contact",
+) -> bool:
+    """Verify a human approval token. Verification only — this process cannot mint one.
 
-    Checks the signature, that the ``jti`` has not been seen before (single use), that the scope
-    matches this review and this target, and that the token has not expired.
+    Checks that the ``jti`` resolves to a recorded approval, that the approval is scoped to this
+    review, this scope and this target, that it has not expired, and that it has not been
+    honoured before. The single-use spend is transactional and is recorded in
+    ``approval_tokens_spent``, never in ``approvals``, so the gateway retires a decision without
+    holding any write on the collection where decisions are authored.
+
+    The spend happens at verification rather than after the effect. That direction is
+    deliberate: a token spent on a send that then failed means a human is asked to approve
+    again, whereas the other direction means a token that survives a partial failure and can be
+    presented twice.
 
     Returns:
         ``False`` for an absent, expired, replayed, mis-scoped or unverifiable token. It never
         raises on a bad token — a bad token is a policy outcome, not an error — so the caller's
         P1 block is the single place the decision is logged.
 
-    TODO(verify): asymmetric verification lands with the approval service, which is the only
-        holder of the private key. Until then this returns ``False`` for everything, which is
-        the correct direction to be wrong in: nothing can be emailed without a token, and no
-        token verifies, so the contact gate is closed rather than open.
+    TODO(verify): cloud verification is an asymmetric signature check against the public half of
+        the approval key pair, and lands with the approval service, which is the only holder of
+        the private half. Until then cloud mode returns ``False`` for everything — the correct
+        direction to be wrong in, because it leaves the contact gate closed rather than open.
     """
+    from shared import approvals
+    from shared.config import settings
+
     if not token:
         return False
-    log.warning(
-        "P1 token verification is not yet implemented; rejecting token for review=%s target=%s",
-        review_id,
-        target,
-    )
-    return False
+
+    if settings().is_cloud:
+        log.warning(
+            "P1 asymmetric verification is not yet implemented; rejecting token for "
+            "review=%s target=%s",
+            review_id,
+            target,
+        )
+        return False
+
+    jti = approvals.jti_of(token)
+    if jti is None:
+        return False
+
+    approval = approvals.load_approval(jti)
+    if approval is None:
+        return False
+
+    if approval.review_id != review_id or approval.scope != scope:
+        log.warning(
+            "approval %s is scoped to review=%s/%s, presented for review=%s/%s",
+            jti,
+            approval.review_id,
+            approval.scope,
+            review_id,
+            scope,
+        )
+        return False
+
+    if approval.target != target:
+        log.warning("approval %s authorises %s, presented for %s", jti, approval.target, target)
+        return False
+
+    if approval.expires_at <= datetime.now(UTC):
+        log.warning("approval %s expired at %s", jti, approval.expires_at.isoformat())
+        return False
+
+    if not approvals.spend(jti, review_id=review_id, target=target):
+        log.warning("approval %s has already been honoured; single use", jti)
+        return False
+
+    log.info("P1 ACCEPTED · approval %s by %s · target=%s", jti, approval.identity, target)
+    return True
 
 
 def issue_approval_token(review_id: str, scope: str, identity: str) -> str:
