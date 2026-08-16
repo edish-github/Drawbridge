@@ -51,12 +51,13 @@ gc services enable \
 made "APIs enabled"
 
 # --- Pub/Sub ------------------------------------------------------------------------------
-# Eleven topics. The list here, the list in shared/events.py and the list in infra/pubsub.yaml
+# Twelve topics. The list here, the list in shared/events.py and the list in infra/pubsub.yaml
 # must agree; CI diffs them, because an undocumented topic is one this script does not create.
 TOPICS=(
   review.intake
   review.plan_ready
   vendor.reply_received
+  review.chase_due
   vendor.evidence_uploaded
   evidence.screened
   review.findings_ready

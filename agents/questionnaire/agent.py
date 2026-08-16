@@ -43,6 +43,7 @@ from shared.config import settings
 from shared.context import context_for
 from shared.domain import Review, ReviewState
 from shared.events import (
+    TOPIC_REVIEW_CHASE_DUE,
     TOPIC_REVIEW_PLAN_READY,
     TOPIC_VENDOR_REPLY_RECEIVED,
     EventEnvelope,
@@ -139,6 +140,9 @@ def handle_event(event: EventEnvelope, review: Review) -> None:
         return
     if event.type == TOPIC_VENDOR_REPLY_RECEIVED:
         on_reply_received(event, review)
+        return
+    if event.type == TOPIC_REVIEW_CHASE_DUE:
+        on_chase_due(event, review)
         return
     raise UnhandledEvent(f"questionnaire has no branch for {event.type!r}")
 
@@ -355,6 +359,8 @@ def on_reply_received(event: EventEnvelope, review: Review) -> None:
         answers = parse_reply(body, review.review_id, ctx, source_msg=source_msg)
         merge_responses(review.review_id, answers, source_msg)
 
+        re_asked = interrogate(ctx, review.review_id, answers)
+
         reached = coverage(review.review_id)
         note_reply_arrival(review)
 
@@ -363,8 +369,8 @@ def on_reply_received(event: EventEnvelope, review: Review) -> None:
             goal=f"parse reply {source_msg}",
             decision=(
                 f"{len(answers)} answer(s) recorded, "
-                f"{sum(1 for a in answers if a.needs_human)} below threshold; "
-                f"coverage {reached:.0%}"
+                f"{sum(1 for a in answers if a.needs_human)} below threshold, "
+                f"{len(re_asked)} re-asked; coverage {reached:.0%}"
             ),
             ctx=ctx,
         )
@@ -375,6 +381,70 @@ def on_reply_received(event: EventEnvelope, review: Review) -> None:
             len(answers),
             reached * 100,
         )
+
+
+def on_chase_due(event: EventEnvelope, review: Review) -> None:
+    """Send the next chase, or stop and hand the review to a person.
+
+    Fired by a scheduler rather than by anything the vendor does, so this is the one handler
+    whose trigger is the passage of time. Three rounds, escalating in tone, then
+    ``NEEDS_HUMAN`` — a fourth reminder is a loop and a vendor who ignored three is not going
+    to answer it.
+
+    A chase that arrives after the vendor has answered everything sends nothing: the state
+    guard admits the event, and the outstanding set decides.
+    """
+    from agents.questionnaire.chaser import chase_round, send_chase
+
+    ctx = context_for(event, agent="questionnaire")
+
+    with span("questionnaire.chase", ctx) as s:
+        before = chase_round(review.review_id)
+        sent = send_chase(ctx, review.review_id)
+
+        record_decision(
+            s,
+            goal="chase the vendor for the questions still outstanding",
+            decision=(
+                f"chase {before + 1} sent"
+                if sent
+                else "nothing outstanding, or the chase cap was reached and a person now owns it"
+            ),
+            ctx=ctx,
+        )
+
+
+def interrogate(ctx, review_id: str, answers: list) -> list[str]:
+    """Re-ask, once each, every answer in this batch that arrived unusable.
+
+    The difference between an agent that collects and one that interrogates. Chasing handles a
+    vendor who said nothing; this handles the far commoner case of a vendor who said "we follow
+    industry best practice" — an answer that is present, polite and worth nothing, and which
+    would otherwise land on an analyst's desk as the manual chasing this project exists to
+    remove.
+
+    Returns the question ids re-asked. A failure to send one is logged and skipped: a follow-up
+    is never worth stopping a review for, and an outstanding re-ask never counts against the
+    coverage threshold, so one ambiguous answer cannot stall a review that is otherwise
+    complete.
+    """
+    from agents.questionnaire.followup import maybe_followup
+
+    re_asked: list[str] = []
+    for answer in answers:
+        if not answer.needs_human:
+            continue
+        if maybe_followup(ctx, review_id, answer.question_id, answer):
+            re_asked.append(answer.question_id)
+
+    if re_asked:
+        log.info(
+            "review=%s re-asked %d question(s) whose answers were below threshold: %s",
+            review_id,
+            len(re_asked),
+            ", ".join(re_asked),
+        )
+    return re_asked
 
 
 def require_screening_record(review_id: str, source_msg: str) -> None:

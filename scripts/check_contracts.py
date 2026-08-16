@@ -68,8 +68,16 @@ def check_topics() -> bool:
     else:
         provisioned = {line.strip() for line in match.group(1).split() if line.strip()}
 
-    if len(constants) != 11:
-        problems.append(f"shared/events.py declares {len(constants)} topics, expected 11")
+    # The count is checked against ALL_TOPICS rather than against a number written here, so
+    # adding a topic constant without adding it to the tuple the worker subscribes from fails
+    # rather than needing this line edited to match.
+    from shared.events import ALL_TOPICS
+
+    if len(constants) != len(ALL_TOPICS):
+        problems.append(
+            f"shared/events.py declares {len(constants)} TOPIC_ constants but ALL_TOPICS holds "
+            f"{len(ALL_TOPICS)}; a topic nothing subscribes to is a topic that does not exist"
+        )
 
     for label, other in (("infra/pubsub.yaml", declared), ("infra/bootstrap.sh", provisioned)):
         for missing in sorted(constants - other):
@@ -146,6 +154,14 @@ def check_bank() -> bool:
     return _fail(problems, "question bank is evidence-demanding and well-formed")
 
 
+APPEND_ONLY = frozenset({"events", "decisions"})
+"""Ledgers written by many identities and read by none of them.
+
+``events`` is the event ledger and ``decisions`` is what the binder's reasoning appendix is
+rendered from. A trace nobody who writes it can read back is the only kind worth printing.
+"""
+
+
 def check_iam() -> bool:
     """Every collection an identity writes must be one it is also allowed to read."""
     problems: list[str] = []
@@ -158,7 +174,10 @@ def check_iam() -> bool:
         # A writer needs read access to perform a read-modify-write. The generated rules add it;
         # this check makes the matrix state it, so the published table matches the rules.
         for collection in sorted(writes - reads):
-            if collection != "events":
+            # Append-only ledgers are the exception: nothing appending to one ever reads it
+            # back, and granting read to satisfy a symmetry rule would widen the grant for the
+            # sake of the rule.
+            if collection not in APPEND_ONLY:
                 problems.append(
                     f"{identity['name']} writes {collection!r} but does not declare reading it"
                 )

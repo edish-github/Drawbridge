@@ -30,6 +30,11 @@ topics:
     consumed_by: [questionnaire]
     payload: message ref
 
+  - name: review.chase_due
+    published_by: [cloud_scheduler]
+    consumed_by: [questionnaire]
+    payload: review_id
+
   - name: vendor.evidence_uploaded
     published_by: [portal]
     consumed_by: [screening]

@@ -62,6 +62,7 @@ class Binder:
     reasoning: list[dict] = field(default_factory=list)
     monitoring: list[dict] = field(default_factory=list)
     subprocessors: list[dict] = field(default_factory=list)
+    followups: dict[str, int] = field(default_factory=dict)
 
     @property
     def review_id(self) -> str:
@@ -120,6 +121,10 @@ def collect(review_id: str) -> Binder:
         _by_field("subprocessors", "vendor_id", str(review.get("vendor_id", ""))),
         "subprocessor_id",
     )
+    binder.followups = {
+        str(f.get("question_id")): int(f.get("count", 0))
+        for f in _by_review("followups", review_id)
+    }
 
     log.info(
         "collected binder material for review=%s: %d timeline, %d answers, %d documents, "

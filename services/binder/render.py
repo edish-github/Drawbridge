@@ -328,20 +328,31 @@ def _section_1_timeline(binder: Binder) -> str:
 
 
 def _section_2_questionnaire(binder: Binder) -> str:
+    re_asked = binder.followups
     rows = "".join(
         f"<tr><td class='mono'>{_text(a.get('question_id'))}</td>"
         f"<td>{_text(a.get('text'))}</td>"
         f"<td class='mono'>{float(a.get('confidence', 0)):.2f}</td>"
         f"<td>{_confidence_pill(a)}</td>"
+        f"<td class='mono'>{re_asked.get(a.get('question_id'), 0) or ''}</td>"
         f"<td class='mono'>{_text(a.get('source_msg'))}</td></tr>"
         for a in binder.questionnaire
+    )
+    note = (
+        f"<p>{len(re_asked)} answer(s) arrived below the confidence threshold and were re-asked, "
+        "once each, quoting the vendor's own words back and naming the evidence required. An "
+        "answer still below threshold after the cap is recorded as a gap rather than chased "
+        "further.</p>"
+        if re_asked
+        else ""
     )
     return f"""<section>
   <h2>2 · Questionnaire and answers</h2>
   <p>Every answer as the vendor gave it, with the confidence the parser assigned and the message
   it arrived in. An answer below the confidence threshold was recorded as needing a human rather
   than counted toward coverage.</p>
-  {_table(rows, "Question", "Answer", "Confidence", "Parse", "Source message")
+  {note}
+  {_table(rows, "Question", "Answer", "Confidence", "Parse", "Re-asked", "Source message")
    if rows else _empty("No answers were recorded.")}
 </section>"""
 

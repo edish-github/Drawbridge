@@ -53,6 +53,10 @@ BEATS = (
     "retier",
     "additional_questions_sent",
     "replies_parsed",
+    # A vendor who answers "we follow industry best practice" has not answered. The fleet asks
+    # again, once, quoting them — which is the beat that separates collecting from
+    # interrogating and the one an analyst recognises from their own inbox.
+    "vague_answers_re_asked",
     "evidence_screened",
     "findings_ready",
     "scored",
@@ -82,8 +86,11 @@ def beats_for(vendor: str) -> list[str]:
     would be asserting against its own opinion.
     """
     expected = load_vendor(vendor).get("expected", {})
-    retiers = bool((expected.get("tier") or {}).get("retier_expected"))
-    skip = set() if retiers else {"retier", "additional_questions_sent"}
+    skip: set[str] = set()
+    if not (expected.get("tier") or {}).get("retier_expected"):
+        skip |= {"retier", "additional_questions_sent"}
+    if not int((expected.get("followups") or {}).get("expected_count", 0)):
+        skip.add("vague_answers_re_asked")
     return [beat for beat in BEATS if beat not in skip]
 
 
@@ -200,7 +207,7 @@ def _run(vendor: str) -> list[str]:
     approve(demo.review_id, scope="contact")
     demo.drain()
     demo.require("contact_gate_released", demo.review().state is ReviewState.QUESTIONNAIRE_OUT)
-    demo.require("questionnaire_sent", inbox_count(demo.review_id) == 1)
+    demo.require("questionnaire_sent", inbox_count(demo.review_id, "questionnaire") == 1)
 
     # --- replies --------------------------------------------------------------------------
     opening_tier = demo.review().tier
@@ -216,9 +223,19 @@ def _run(vendor: str) -> list[str]:
             # The re-tier put the review back in QUESTIONNAIRE_OUT and republished the plan; the
             # drain above already delivered the additional set. Asserting the count rather than
             # the send is what makes "and nothing twice" checkable.
-            demo.require("additional_questions_sent", inbox_count(demo.review_id) == 2)
+            demo.require(
+                "additional_questions_sent", inbox_count(demo.review_id, "questionnaire") == 2
+            )
 
     demo.require("replies_parsed", answered_count(demo.review_id) > 0)
+
+    expected_followups = int(
+        (load_vendor(vendor).get("expected", {}).get("followups") or {}).get("expected_count", 0)
+    )
+    if expected_followups:
+        demo.require(
+            "vague_answers_re_asked", inbox_count(demo.review_id, "followup") == expected_followups
+        )
 
     # The scripted schedule is exhausted. If it answered enough, the coverage threshold has
     # already opened evidence review on its own; if it did not, an analyst proceeding with what
@@ -304,8 +321,23 @@ def approve(review_id: str, *, scope: str) -> None:
     issue(review_id, scope=scope, identity="demo-operator", ttl_minutes=30)
 
 
-def inbox_count(review_id: str) -> int:
-    return _count("inbox", review_id)
+def inbox_count(review_id: str, kind: str | None = None) -> int:
+    """Count messages sent to the vendor, optionally of one kind.
+
+    "The vendor was emailed once" is a claim about the questionnaire, not about the whole
+    correspondence. Counting the thread would make a sensible follow-up look like a duplicate
+    send, which is the opposite of what the beat is checking.
+    """
+    from google.cloud.firestore_v1 import FieldFilter
+
+    query = (
+        firestore_client()
+        .collection("inbox")
+        .where(filter=FieldFilter("review_id", "==", review_id))
+    )
+    if kind is not None:
+        query = query.where(filter=FieldFilter("kind", "==", kind))
+    return len(list(query.stream()))
 
 
 def finding_count(review_id: str) -> int:

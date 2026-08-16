@@ -52,12 +52,33 @@ def test_the_vendor_was_emailed_once_per_plan_version_and_never_twice_for_a_ques
     message is the difference between the sets, so no question is asked twice and none is
     dropped."""
     review = _latest_review()
-    sent = _inbox(review["review_id"])
+    sent = _inbox(review["review_id"], "questionnaire")
     asked = [line for message in sent for line in _question_ids(message["body"])]
 
     assert len(sent) == review["plan_version"] == 2
     assert len(asked) == len(set(asked)), "a question was asked twice across the re-plan"
     assert set(asked) == set(review["sent_questions"])
+
+
+@emulator_required
+@pubsub_required
+def test_every_answer_below_threshold_is_re_asked_exactly_once(datadynamo_run):
+    """The vendor's vague answers draw one targeted re-ask each, quoting them. This is the beat
+    that separates an agent that collects from one that interrogates, and the cap is what keeps
+    the second from becoming a loop."""
+    from agents.questionnaire.followup import outstanding
+    from shared.config import settings
+
+    review = _latest_review()
+    weak = {a["question_id"] for a in _responses(review["review_id"]) if a["needs_human"]}
+    re_asked = outstanding(review["review_id"])
+    bodies = [m["body"] for m in _inbox(review["review_id"], "followup")]
+
+    assert set(re_asked) == weak, "every unusable answer is re-asked, and only those"
+    assert all(count <= settings().followup_cap for count in re_asked.values())
+    assert any("industry best practice" in body for body in bodies), (
+        "the re-ask quotes the vendor's own words back rather than restating the question"
+    )
 
 
 @emulator_required
@@ -185,27 +206,42 @@ def _latest_review() -> dict:
 
 
 def _findings(review_id: str) -> list[dict]:
+    return _scoped("findings", review_id)
+
+
+def _responses(review_id: str) -> list[dict]:
+    return _scoped("qa_responses", review_id)
+
+
+def _scoped(collection: str, review_id: str) -> list[dict]:
     from google.cloud.firestore_v1 import FieldFilter
 
     return [
         d.to_dict()
         for d in firestore_client()
-        .collection("findings")
+        .collection(collection)
         .where(filter=FieldFilter("review_id", "==", review_id))
         .stream()
     ]
 
 
-def _inbox(review_id: str) -> list[dict]:
+def _inbox(review_id: str, kind: str | None = None) -> list[dict]:
+    """Messages sent to the vendor, optionally of one kind.
+
+    Three things write here — the questionnaire, a targeted follow-up and a chase — and they
+    are counted separately. "Emailed once per plan version" is a claim about the questionnaire;
+    counting the whole thread would make a follow-up read as a duplicate send.
+    """
     from google.cloud.firestore_v1 import FieldFilter
 
-    return [
-        d.to_dict()
-        for d in firestore_client()
+    query = (
+        firestore_client()
         .collection("inbox")
         .where(filter=FieldFilter("review_id", "==", review_id))
-        .stream()
-    ]
+    )
+    if kind is not None:
+        query = query.where(filter=FieldFilter("kind", "==", kind))
+    return [d.to_dict() for d in query.stream()]
 
 
 def _question_ids(body: str) -> list[str]:

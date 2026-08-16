@@ -32,6 +32,7 @@ log = logging.getLogger("drawbridge.events")
 TOPIC_REVIEW_INTAKE = "review.intake"
 TOPIC_REVIEW_PLAN_READY = "review.plan_ready"
 TOPIC_VENDOR_REPLY_RECEIVED = "vendor.reply_received"
+TOPIC_REVIEW_CHASE_DUE = "review.chase_due"
 TOPIC_VENDOR_EVIDENCE_UPLOADED = "vendor.evidence_uploaded"
 TOPIC_EVIDENCE_SCREENED = "evidence.screened"
 TOPIC_REVIEW_FINDINGS_READY = "review.findings_ready"
@@ -45,6 +46,7 @@ ALL_TOPICS: tuple[str, ...] = (
     TOPIC_REVIEW_INTAKE,
     TOPIC_REVIEW_PLAN_READY,
     TOPIC_VENDOR_REPLY_RECEIVED,
+    TOPIC_REVIEW_CHASE_DUE,
     TOPIC_VENDOR_EVIDENCE_UPLOADED,
     TOPIC_EVIDENCE_SCREENED,
     TOPIC_REVIEW_FINDINGS_READY,
@@ -59,6 +61,7 @@ EXPECTED_STATES: dict[str, set[ReviewState]] = {
     TOPIC_REVIEW_INTAKE: {ReviewState.INTAKE},
     TOPIC_REVIEW_PLAN_READY: {ReviewState.QUESTIONNAIRE_OUT},
     TOPIC_VENDOR_REPLY_RECEIVED: {ReviewState.QUESTIONNAIRE_OUT, ReviewState.REPLIES_IN},
+    TOPIC_REVIEW_CHASE_DUE: {ReviewState.QUESTIONNAIRE_OUT, ReviewState.REPLIES_IN},
     TOPIC_VENDOR_EVIDENCE_UPLOADED: {
         ReviewState.QUESTIONNAIRE_OUT,
         ReviewState.REPLIES_IN,

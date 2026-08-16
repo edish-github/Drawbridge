@@ -84,6 +84,13 @@ service cloud.firestore {
       allow write: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com'];
     }
 
+    match /followups/{doc} {
+      // read:  sa-questionnaire, sa-dashboard, sa-binder
+      // write: sa-questionnaire
+      allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
+      allow write: if caller() in ['sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
+    }
+
     match /idempotency/{doc} {
       // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog
       // write: sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog

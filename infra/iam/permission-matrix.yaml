@@ -52,9 +52,9 @@ identities:
       # approval exists and the gateway decides. approval_tokens_spent is where single use is
       # recorded, which is deliberately not the collection approvals are authored in.
       read: [reviews, vendors, qa_responses, qa_responses_superseded, inbox, approvals,
-             approval_tokens_spent, idempotency, dashboard_events]
+             approval_tokens_spent, followups, idempotency, dashboard_events]
       write: [reviews, qa_responses, qa_responses_superseded, inbox, approval_tokens_spent,
-              idempotency, dashboard_events, events, decisions]
+              followups, idempotency, dashboard_events, events, decisions]
     pubsub: [publish, subscribe]
     vertex_ai: true
     storage: []
@@ -162,7 +162,7 @@ identities:
     purpose: Internal review queue, timeline and gate cards.
     firestore:
       read: [reviews, vendors, findings, scores, memos, screenings, approvals, events, tasks,
-             inbox, decisions, dashboard_events]
+             inbox, followups, decisions, dashboard_events]
       write: [events]
     pubsub: [publish]
     vertex_ai: false
@@ -196,7 +196,8 @@ identities:
     firestore:
       read: [reviews, vendors, findings, scores, memos, screenings, approvals, events,
              qa_responses, qa_responses_superseded, evidence_chunks, subprocessors, tasks,
-             inert_excerpts, decisions, data_scope_classifications, dashboard_events]
+             inert_excerpts, followups, decisions, data_scope_classifications,
+             dashboard_events]
       write: []
     pubsub: []
     vertex_ai: false

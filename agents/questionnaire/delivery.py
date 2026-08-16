@@ -31,6 +31,15 @@ log = logging.getLogger("drawbridge.delivery")
 COLLECTION_INBOX = "inbox"
 TOOL_SEND_EMAIL = "send_email"
 
+KINDS = ("questionnaire", "followup", "chase")
+"""What a message is, recorded on it.
+
+Three things now write to this collection and they are counted separately everywhere it
+matters: "the vendor was emailed once" is a claim about the questionnaire, not about the
+correspondence, and a test or a demo beat that counted the whole thread would start failing the
+first time the fleet asked a sensible follow-up question.
+"""
+
 
 def send_email(
     *,
@@ -39,6 +48,7 @@ def send_email(
     body: str,
     review_id: str,
     vendor: str = "",
+    kind: str = "questionnaire",
     approval_token: str | None = None,
 ) -> dict:
     """Deliver one message and record it. Reached only through the gateway.
@@ -53,10 +63,11 @@ def send_email(
             "to": to,
             "subject": subject,
             "body": body,
+            "kind": kind if kind in KINDS else "questionnaire",
             "sent_at": datetime.now(UTC).isoformat(),
         }
     )
-    log.info("sent review=%s to=%s subject=%r", review_id, to, subject)
+    log.info("sent review=%s kind=%s to=%s subject=%r", review_id, kind, to, subject)
     return {"sent": True, "to": to}
 
 

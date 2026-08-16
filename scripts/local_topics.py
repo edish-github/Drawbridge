@@ -1,4 +1,4 @@
-"""Create the eleven topics, their dead-letter counterparts and subscriptions in the emulator.
+"""Create the twelve topics, their dead-letter counterparts and subscriptions in the emulator.
 
 The cloud equivalent is ``infra/bootstrap.sh``; this is the same topology against the Pub/Sub
 emulator so local mode has the same event backbone rather than an approximation of it. Both
