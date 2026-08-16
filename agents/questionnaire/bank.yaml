@@ -9,8 +9,14 @@
 # possible later. "Do you encrypt data?" is rejected; "List the encryption standards used
 # for data at rest and in transit and attach your key-management policy" is the shape.
 #
-# Tier 1 selects roughly 60 questions, Tier 2 roughly 30, Tier 3 roughly 12. The ai_specific
-# domain is added when the vendor is an AI service.
+# One bank, three depths, selected by the tier list on each question rather than by three
+# separate files. Tier 1 selects 60 questions, Tier 2 selects 30, Tier 3 selects 12 — the
+# counts fall out of the tier lists below and out of the domain sets in rubric.yaml, which is
+# why a Tier 3 review never sees an incident-response question: the domain is not in its
+# profile at all. The ai_specific domain is added when the vendor is an AI service.
+#
+# Question ids are stable. Fixtures, expected.json files and follow-up records reference them,
+# so an id is never reused for a different question and never renumbered.
 
 version: 1
 
@@ -40,6 +46,54 @@ domains:
         Describe how customer data is segregated between tenants, and attach the design or
         architecture document that describes the mechanism.
       evidence_required: [architecture_document]
+    - id: DP05
+      tiers: [1, 2, 3]
+      text: >-
+        Describe the legal basis and contractual terms under which you process customer
+        personal data, and attach your standard data processing agreement.
+      evidence_required: [data_processing_agreement]
+    - id: DP06
+      tiers: [1, 2, 3]
+      text: >-
+        State the process and maximum elapsed time for responding to a customer request to
+        export or delete their data, and attach evidence from your three most recent requests.
+      evidence_required: [dsar_records]
+    - id: DP07
+      tiers: [1, 2, 3]
+      text: >-
+        Describe where encryption keys are held, who can access them, and the rotation interval
+        applied to each key class.
+      evidence_required: [key_management_policy]
+    - id: DP08
+      tiers: [1, 2]
+      text: >-
+        Describe your backup schedule, the retention applied to backups, and the encryption
+        applied to them at rest and in transit.
+      evidence_required: [backup_policy]
+    - id: DP09
+      tiers: [1]
+      text: >-
+        Name the mechanism used for any transfer of customer personal data out of its region of
+        origin, and attach the transfer impact assessment covering it.
+      evidence_required: [transfer_impact_assessment]
+    - id: DP10
+      tiers: [1]
+      text: >-
+        Describe how customer data is masked, redacted or synthesised in your non-production
+        environments, and name any environments where production data is used directly.
+      evidence_required: [environment_data_policy]
+    - id: DP11
+      tiers: [1]
+      text: >-
+        Describe the classification scheme applied to the data you hold on our behalf and the
+        handling requirements attached to each classification level.
+      evidence_required: [data_classification_policy]
+    - id: DP12
+      tiers: [1]
+      text: >-
+        State the retention period applied to your own application and access logs, and
+        identify which of those logs contain customer personal data.
+      evidence_required: [logging_policy]
 
   access_control:
     - id: AC01
@@ -66,6 +120,36 @@ domains:
         Describe how your staff access customer data in production, including approval,
         logging and time limits on that access.
       evidence_required: [production_access_procedure]
+    - id: AC05
+      tiers: [1, 2, 3]
+      text: >-
+        Describe the authentication methods available to our users, naming the single sign-on
+        protocols you support and any that require additional licensing.
+      evidence_required: [sso_documentation]
+    - id: AC06
+      tiers: [1, 2, 3]
+      text: >-
+        Describe the roles available in your product, the permissions attached to each, and how
+        an administrator restricts a user to a subset of our data.
+      evidence_required: [rbac_documentation]
+    - id: AC07
+      tiers: [1, 2, 3]
+      text: >-
+        State the frequency of your access recertification process, name the role accountable
+        for it, and attach the two most recent completed recertifications.
+      evidence_required: [access_review]
+    - id: AC08
+      tiers: [1]
+      text: >-
+        Describe your password and credential policy, including length, complexity, reuse and
+        rotation requirements, and how they are technically enforced.
+      evidence_required: [credential_policy]
+    - id: AC09
+      tiers: [1]
+      text: >-
+        Describe how service accounts, API keys and machine credentials are issued, scoped,
+        rotated and revoked, and state the maximum lifetime of each.
+      evidence_required: [service_account_policy]
 
   incident_response:
     - id: IR01
@@ -86,6 +170,42 @@ domains:
         Describe your most recent incident response exercise, including the date, the
         scenario, the participants and the remediation actions it produced.
       evidence_required: [tabletop_exercise_report]
+    - id: IR04
+      tiers: [1, 2]
+      text: >-
+        Describe your security monitoring coverage, naming the systems that generate alerts and
+        the hours during which those alerts are reviewed by a person.
+      evidence_required: [monitoring_description]
+    - id: IR05
+      tiers: [1, 2]
+      text: >-
+        State your incident severity definitions and the response and escalation times
+        committed against each, and attach the plan that records them.
+      evidence_required: [incident_response_plan]
+    - id: IR06
+      tiers: [1, 2]
+      text: >-
+        Describe how you determine which customers are affected by an incident, and state how
+        long that determination took in your most recent one.
+      evidence_required: [incident_history]
+    - id: IR07
+      tiers: [1]
+      text: >-
+        Describe your vulnerability management process, stating remediation deadlines by
+        severity and attaching your most recent scan summary.
+      evidence_required: [vulnerability_report]
+    - id: IR08
+      tiers: [1]
+      text: >-
+        State the date and scope of your most recent penetration test, name the testing firm,
+        and attach the report or its executive summary.
+      evidence_required: [penetration_test_report]
+    - id: IR09
+      tiers: [1]
+      text: >-
+        Describe how forensic evidence is preserved during an incident, including what is
+        retained, for how long, and who can access it.
+      evidence_required: [forensics_procedure]
 
   compliance_posture:
     - id: CP01
@@ -112,6 +232,36 @@ domains:
         List your current certifications with their issuing body, certificate number and
         expiry date, and attach each certificate.
       evidence_required: [certificates]
+    - id: CP05
+      tiers: [1, 2, 3]
+      text: >-
+        State the date of your next scheduled audit or surveillance assessment and the period
+        it will cover, and attach the engagement letter or scheduling confirmation.
+      evidence_required: [audit_schedule]
+    - id: CP06
+      tiers: [1, 2, 3]
+      text: >-
+        Name the individual or role accountable for information security in your organisation,
+        state who they report to, and attach your security policy showing that ownership.
+      evidence_required: [information_security_policy]
+    - id: CP07
+      tiers: [1]
+      text: >-
+        Describe the security training your staff complete, its frequency, and the completion
+        rate achieved in the most recent cycle.
+      evidence_required: [training_records]
+    - id: CP08
+      tiers: [1]
+      text: >-
+        Describe the background screening applied to staff with access to customer data, and
+        state which checks are performed in each jurisdiction where you employ people.
+      evidence_required: [screening_policy]
+    - id: CP09
+      tiers: [1]
+      text: >-
+        State the coverage and limits of your cyber liability insurance and attach the current
+        certificate of insurance.
+      evidence_required: [insurance_certificate]
 
   subprocessors:
     - id: SP01
@@ -132,6 +282,42 @@ domains:
         State the notice period you give customers before adding or replacing a subprocessor,
         and describe the objection mechanism available to them.
       evidence_required: [dpa_extract]
+    - id: SP04
+      tiers: [1, 2]
+      text: >-
+        Name every subprocessor that can access customer data in plaintext, and state the
+        technical control that limits what each one can reach.
+      evidence_required: [subprocessor_list]
+    - id: SP05
+      tiers: [1, 2]
+      text: >-
+        Describe the contractual terms you flow down to subprocessors covering security,
+        breach notification and audit rights, and attach a representative agreement.
+      evidence_required: [subprocessor_agreement]
+    - id: SP06
+      tiers: [1, 2]
+      text: >-
+        Describe how you monitor a subprocessor's security posture after onboarding, stating
+        the frequency of review and what triggers an off-cycle one.
+      evidence_required: [subprocessor_monitoring_procedure]
+    - id: SP07
+      tiers: [1]
+      text: >-
+        Name any fourth parties your subprocessors rely on to process customer data, and state
+        how you became aware of them.
+      evidence_required: [fourth_party_disclosure]
+    - id: SP08
+      tiers: [1]
+      text: >-
+        Describe your process for removing a subprocessor, including how customer data held by
+        them is returned or destroyed and how that destruction is evidenced.
+      evidence_required: [offboarding_procedure]
+    - id: SP09
+      tiers: [1]
+      text: >-
+        State which subprocessors are located outside the region where our data is stored, and
+        name the transfer mechanism relied on for each.
+      evidence_required: [transfer_impact_assessment]
 
   business_continuity:
     - id: BC01
@@ -146,6 +332,30 @@ domains:
         Describe the date, scope and outcome of your most recent disaster recovery test,
         including any objectives that were not met.
       evidence_required: [dr_test_report]
+    - id: BC03
+      tiers: [1, 2]
+      text: >-
+        State your service availability commitment, the availability actually achieved in each
+        of the last four quarters, and attach the reports evidencing it.
+      evidence_required: [availability_reports]
+    - id: BC04
+      tiers: [1, 2]
+      text: >-
+        Describe the redundancy of the infrastructure serving this product, naming the failure
+        domains it survives and any single points of failure that remain.
+      evidence_required: [architecture_document]
+    - id: BC05
+      tiers: [1]
+      text: >-
+        Describe the arrangements available to customers if you cease trading or discontinue
+        this product, including data return and any escrow in place.
+      evidence_required: [exit_plan]
+    - id: BC06
+      tiers: [1]
+      text: >-
+        State the frequency with which backup restoration is tested, and attach the results of
+        the two most recent restoration tests.
+      evidence_required: [restore_test_results]
 
   ai_specific:
     - id: AI01
@@ -172,3 +382,15 @@ domains:
         State your retention period for prompts and generated outputs, and describe who inside
         your organisation can read them.
       evidence_required: [prompt_retention_policy]
+    - id: AI05
+      tiers: [1]
+      text: >-
+        Describe the controls that prevent one customer's content from influencing another
+        customer's model outputs, and attach the design document describing them.
+      evidence_required: [tenant_isolation_design]
+    - id: AI06
+      tiers: [1]
+      text: >-
+        Describe how you evaluate model outputs for accuracy, bias and harmful content, stating
+        the frequency of evaluation and attaching your most recent results.
+      evidence_required: [model_evaluation_report]
