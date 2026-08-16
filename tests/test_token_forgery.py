@@ -4,63 +4,186 @@ If both sides shared one secret, anything that can verify could also forge — a
 reachable by every agent in the fleet. These tests are what turn "the gateway checks for a
 token" into "the gateway can recognise a human decision but is structurally incapable of
 manufacturing one".
+
+The tests below run against local verification, which is a record lookup rather than a
+signature check. That is honest about what it proves: scope, target, expiry and single use are
+enforced today, and what stops an agent writing its own approval is collection-level IAM. The
+tests that require asymmetric key material stay skipped and say so, because a test that asserted
+forgery is impossible while the mechanism preventing it does not exist is worse than no test.
 """
+
+from __future__ import annotations
+
+import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from shared import approvals
+from shared.approvals import COLLECTION_APPROVALS, Approval, token_for
+from shared.clients import firestore_client
+from shared.gateway import SigningKeyUnavailable, issue_approval_token, verify_approval_token
+from tests.conftest import emulator_required
 
-@pytest.mark.skip(reason="shared/gateway.py is a contract; unskip when it executes")
-def test_gateway_cannot_mint_an_approval():
-    """The gateway process holds the public key only."""
+TARGET = "contact@vendor.example"
+
+
+def write_approval(
+    review_id: str,
+    *,
+    scope: str = "contact",
+    target: str = TARGET,
+    expires_in_minutes: int = 10,
+) -> str:
+    """Record an approval the way the approval service does, and return its token.
+
+    The test stands in for the approval service on purpose: there is no minting function inside
+    the shared package to call, which is the property under test in the first case below.
+    """
+    now = datetime.now(UTC)
+    approval = Approval(
+        jti=uuid.uuid4().hex,
+        review_id=review_id,
+        scope=scope,
+        target=target,
+        identity="test-operator",
+        issued_at=now,
+        expires_at=now + timedelta(minutes=expires_in_minutes),
+    )
+    firestore_client().collection(COLLECTION_APPROVALS).document(approval.jti).set(
+        approval.model_dump(mode="json")
+    )
+    return token_for(approval.jti)
+
+
+# --- The gateway cannot sign ------------------------------------------------------------------
+
+
+def test_the_gateway_cannot_mint_an_approval():
+    """The gateway process holds the public key only, so asking it to sign fails loudly."""
     with pytest.raises(SigningKeyUnavailable):
-        as_service("gateway").issue_approval_token(review_id(), scope="decision", identity="x")
+        issue_approval_token("r1", scope="decision", identity="x")
 
+
+def test_the_shared_package_exposes_no_way_to_issue_one():
+    """Structural, not conventional: an agent that imports everything still cannot mint.
+
+    Minting lives in the approval service and, locally, in ``scripts/issue_token.py``. If an
+    issue function ever appears in ``shared.approvals``, every agent in the fleet gains the
+    ability to approve its own outbound contact.
+    """
+    exposed = [name for name in dir(approvals) if not name.startswith("_")]
+    forbidden = {"issue", "mint", "sign", "create_approval", "issue_approval_token"}
+
+    assert not forbidden.intersection(exposed), f"minting reached the shared package: {exposed}"
+
+
+def test_an_unsigned_invented_token_fails():
+    """The assume-breach case at the level the local mechanism operates on."""
+    forged = token_for(uuid.uuid4().hex)
+
+    assert verify_approval_token("r1", TARGET, token=forged) is False
+
+
+def test_an_absent_or_malformed_token_fails():
+    assert verify_approval_token("r1", TARGET, token=None) is False
+    assert verify_approval_token("r1", TARGET, token="") is False
+    assert verify_approval_token("r1", TARGET, token="not-one-of-ours") is False
+    assert verify_approval_token("r1", TARGET, token="drawbridge-approval:") is False
+
+
+# --- Scope, target, expiry, single use --------------------------------------------------------
+
+
+@emulator_required
+def test_a_valid_token_verifies_once(review_id):
+    token = write_approval(review_id)
+
+    assert verify_approval_token(review_id, TARGET, token=token) is True
+
+
+@emulator_required
+def test_a_replayed_token_fails(review_id):
+    """Single use, recorded by jti."""
+    token = write_approval(review_id)
+
+    assert verify_approval_token(review_id, TARGET, token=token) is True
+    assert verify_approval_token(review_id, TARGET, token=token) is False
+
+
+@emulator_required
+def test_a_token_for_another_review_fails(review_id):
+    token = write_approval("some-other-review")
+
+    assert verify_approval_token(review_id, TARGET, token=token) is False
+
+
+@emulator_required
+def test_a_token_scoped_to_another_address_fails(review_id):
+    token = write_approval(review_id, target="someone@else.example")
+
+    assert verify_approval_token(review_id, TARGET, token=token) is False
+
+
+@emulator_required
+def test_a_decision_token_does_not_authorise_contact(review_id):
+    """A contact approval must never double as a vendor approval, in either direction."""
+    token = write_approval(review_id, scope="decision")
+
+    assert verify_approval_token(review_id, TARGET, token=token, scope="contact") is False
+
+
+@emulator_required
+def test_an_expired_token_fails(review_id):
+    token = write_approval(review_id, expires_in_minutes=-1)
+
+    assert verify_approval_token(review_id, TARGET, token=token) is False
+
+
+@emulator_required
+def test_a_rejected_token_is_not_consumed(review_id):
+    """A mis-scoped presentation must not burn the approval it was not entitled to."""
+    token = write_approval(review_id, target="someone@else.example")
+
+    assert verify_approval_token(review_id, TARGET, token=token) is False
+    assert verify_approval_token(review_id, "someone@else.example", token=token) is True
+
+
+@emulator_required
+def test_verification_never_writes_to_the_approvals_collection(review_id, db):
+    """Single use is recorded where the gateway may write, not where approvals are authored."""
+    token = write_approval(review_id)
+    jti = approvals.jti_of(token)
+
+    verify_approval_token(review_id, TARGET, token=token)
+
+    assert db.collection(COLLECTION_APPROVALS).document(jti).get().to_dict()["jti"] == jti
+    assert db.collection(approvals.COLLECTION_SPENT).document(jti).get().exists
+
+
+# --- Still contracts ----------------------------------------------------------------------------
+
+
+@pytest.mark.skip(reason="asymmetric verification lands with the approval service")
+def test_a_token_signed_with_the_public_key_fails():
+    """Verification with the public half must not accept a signature made with it."""
     claims = {"review_id": review_id(), "scope": "decision"}
     forged = jwt_sign(claims, key=public_key(APPROVAL_PUBLIC_KEY))
-    assert verify_approval_token(review_id(), "contact@vendor.example", token=forged) is False
+
+    assert verify_approval_token(review_id(), TARGET, token=forged) is False
 
 
-@pytest.mark.skip(reason="shared/gateway.py is a contract; unskip when it executes")
+@pytest.mark.skip(reason="asymmetric verification lands with the approval service")
 def test_an_agent_holding_the_gateway_config_cannot_forge_a_token():
     """The assume-breach case: even with everything the gateway holds, forgery is impossible."""
     config = full_gateway_configuration()
 
     forged = attempt_to_mint_token(config, review_id=review_id(), scope="decision")
 
-    assert verify_approval_token(review_id(), "contact@vendor.example", token=forged) is False
+    assert verify_approval_token(review_id(), TARGET, token=forged) is False
 
 
-@pytest.mark.skip(reason="shared/gateway.py is a contract; unskip when it executes")
-def test_a_replayed_token_fails():
-    """Single use, recorded by jti."""
-    token = issue_valid_token(review_id(), scope="email:contact@vendor.example")
-
-    assert verify_approval_token(review_id(), "contact@vendor.example", token=token) is True
-    assert verify_approval_token(review_id(), "contact@vendor.example", token=token) is False
-
-
-@pytest.mark.skip(reason="shared/gateway.py is a contract; unskip when it executes")
-def test_a_token_for_another_review_fails():
-    token = issue_valid_token("some-other-review", scope="decision")
-
-    assert verify_approval_token(review_id(), "contact@vendor.example", token=token) is False
-
-
-@pytest.mark.skip(reason="shared/gateway.py is a contract; unskip when it executes")
-def test_a_token_scoped_to_another_address_fails():
-    token = issue_valid_token(review_id(), scope="email:someone@else.example")
-
-    assert verify_approval_token(review_id(), "contact@vendor.example", token=token) is False
-
-
-@pytest.mark.skip(reason="shared/gateway.py is a contract; unskip when it executes")
-def test_an_expired_token_fails():
-    token = issue_expired_token(review_id(), scope="decision")
-
-    assert verify_approval_token(review_id(), "contact@vendor.example", token=token) is False
-
-
-@pytest.mark.skip(reason="shared/gateway.py is a contract; unskip when it executes")
+@pytest.mark.skip(reason="the decision gate lands with the Risk Scorer")
 def test_no_code_path_reaches_decided_without_a_token():
     r = run_until("scored", vendor="cleancloud")
 
@@ -69,16 +192,3 @@ def test_no_code_path_reaches_decided_without_a_token():
 
     assert load_review(r.review_id).state == ReviewState.GATED
     assert load_review(r.review_id).gate_scope == "decision"
-
-
-@pytest.mark.skip(reason="shared/gateway.py is a contract; unskip when it executes")
-def test_first_outbound_contact_without_a_token_parks_at_the_contact_gate():
-    """P1 is the machine's inability to skip G2."""
-    r = run_until("plan_ready", vendor="cleancloud")
-
-    with pytest.raises(PolicyViolation):
-        send_questionnaire(ctx(), r.review_id, "contact@vendor.example", questions=[])
-
-    assert load_review(r.review_id).state == ReviewState.GATED
-    assert load_review(r.review_id).gate_scope == "contact"
-    assert inbox_count("cleancloud") == 0

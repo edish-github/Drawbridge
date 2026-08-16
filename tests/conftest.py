@@ -57,6 +57,45 @@ def _local_mode_env():
         provider.shutdown()
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _drain_subscriptions(_local_mode_env):
+    """Leave the emulator's subscriptions empty when the run finishes.
+
+    Tests publish real events, and the emulator keeps them until something acknowledges them.
+    Without this, ``make run-local`` after a test run consumes a backlog of test reviews and
+    reports policy blocks for reviews that no longer mean anything — which reads as a product
+    failure and is nothing of the kind.
+    """
+    yield
+
+    if not _reachable(PUBSUB_HOST):
+        return
+
+    from google.api_core import exceptions as gexc
+
+    from shared.clients import subscriber_client, subscription_path
+    from shared.events import ALL_TOPICS, subscription_name
+
+    client = subscriber_client()
+    for topic in ALL_TOPICS:
+        path = subscription_path(subscription_name(topic))
+        while True:
+            try:
+                pulled = client.pull(
+                    request={"subscription": path, "max_messages": 100}, timeout=0.5
+                )
+            except (gexc.DeadlineExceeded, gexc.NotFound):
+                break
+            if not pulled.received_messages:
+                break
+            client.acknowledge(
+                request={
+                    "subscription": path,
+                    "ack_ids": [m.ack_id for m in pulled.received_messages],
+                }
+            )
+
+
 @pytest.fixture
 def review_id() -> str:
     """A unique review id per test, so emulator state cannot leak between tests."""
