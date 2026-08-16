@@ -44,7 +44,7 @@ required-technology clause satisfied through a different endpoint.
 
 ```
 cp .env.example .env      # set GEMINI_API_KEY; leave RUNTIME_MODE=local
-make emulators            # Firestore, Pub/Sub, and the eleven topics with their subscriptions
+make emulators            # Firestore with rules loaded, Pub/Sub, and the twelve topics
 make run-local            # the worker: pull events, dispatch to agents, acknowledge
 ```
 
@@ -138,7 +138,7 @@ That refusal is the honest answer to *why might a resumable agent order two lapt
 
 ## Permission matrix
 
-Nine identities, scoped at collection level, generated into Firestore security rules from
+Ten identities, scoped at collection level, generated into Firestore security rules from
 [`infra/iam/permission-matrix.yaml`](infra/iam/permission-matrix.yaml) by `make rules`. One
 source, two enforcement points: the table below and the ruleset the emulator loads cannot drift,
 and a test fails if the code names a collection the matrix does not.
@@ -149,8 +149,8 @@ make emulators  # start the emulator with them loaded
 pytest tests/test_iam_boundaries.py
 ```
 
-**220 rows, all 22 collections and all 10 identities, checked against the running emulator** —
-43 permitted writes and 177 denials, each one a real `PermissionDenied` from a real rules
+**230 rows, all 23 collections and all 10 identities, checked against the running emulator** —
+44 permitted writes and 186 denials, each one a real `PermissionDenied` from a real rules
 evaluation rather than a claim in a document. What the emulator cannot check is IAM identity:
 that the Evidence agent genuinely *runs as* `sa-evidence` is a binding between a revision and a
 service account, and those tests stay skipped with that as their stated reason rather than a
