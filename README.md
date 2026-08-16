@@ -36,6 +36,47 @@ make demo        # run the scripted end-to-end scenario
 make teardown    # delete everything except the dashboard
 ```
 
+## Running locally
+
+No Google Cloud project, no billing account and no credentials. Local mode runs the kernel and
+the agents against the Firestore and Pub/Sub emulators with a Gemini API key, which is the same
+required-technology clause satisfied through a different endpoint.
+
+```
+cp .env.example .env      # set GEMINI_API_KEY; leave RUNTIME_MODE=local
+make emulators            # Firestore, Pub/Sub, and the eleven topics with their subscriptions
+make run-local            # the worker: pull events, dispatch to agents, acknowledge
+```
+
+Then, in a second terminal, walk a review from intake to first contact:
+
+```
+make open-review VENDOR=nimbuswrite
+```
+
+The worker tiers the review, checkpoints its plan, builds the questionnaire — and stops. The
+gateway refuses the send under policy P1 because no human has approved first contact, the review
+parks in `GATED` with `gate_scope=contact`, and the refusal is logged as a named policy:
+
+```
+P1 REJECTED · ref=trust@nimbuswrite.example
+review=... parked at the contact gate — P1: outbound email requires a human approval token
+```
+
+Release it the way the approvals service will:
+
+```
+python -m scripts.issue_token --review-id <id> --identity you@example.com
+```
+
+The questionnaire is then delivered exactly once, and stays delivered exactly once however many
+times the event is redelivered — the send is claimed under
+`<review_id>:plan_v1:questionnaire_send:v1`, and the checkpoint and the idempotency key both
+refuse to repeat it.
+
+`make dev-ui` runs the ADK development UI against the agent packages for inspecting one agent
+interactively; it does not consume the event backbone.
+
 ## Synthetic data
 
 Every vendor, document and questionnaire answer in this repository is synthetic and was
