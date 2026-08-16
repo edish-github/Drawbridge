@@ -26,11 +26,13 @@
 
 set -euo pipefail
 
-PROJECT_ID="${PROJECT_ID:?PROJECT_ID must be set}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+TAG="armor"
+# shellcheck source=infra/lib.sh
+. "${REPO_ROOT}/infra/lib.sh"
+require_project
 REGION="${REGION:-us-central1}"
 
-log() { printf '[armor] %s\n' "$*"; }
-gc()  { gcloud --project="${PROJECT_ID}" "$@"; }
 
 RAI_FILTERS='[
   {"filterType":"HATE_SPEECH","confidenceLevel":"MEDIUM_AND_ABOVE"},
@@ -42,7 +44,7 @@ RAI_FILTERS='[
 create_template() {
   local id="$1"
 
-  if gc model-armor templates describe "${id}" --location="${REGION}" >/dev/null 2>&1; then
+  if probe model-armor templates describe "${id}" --location="${REGION}"; then
     log "  exists, skipping: ${id}"
     return 0
   fi

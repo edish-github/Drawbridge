@@ -10,25 +10,36 @@
 # was already there.
 #
 # Required environment: PROJECT_ID. Optional: REGION (defaults to us-central1).
+#
+# DRY_RUN=1 prints every gcloud command instead of running it, and skips the billing preflight.
+# The first real run should not also be the first run: a rehearsal catches a mistyped flag, a
+# resource named two different ways in two places, and an ordering mistake — for the price of
+# reading the output, and without a project.
 
 set -euo pipefail
 
-PROJECT_ID="${PROJECT_ID:?PROJECT_ID must be set; this script does not create projects}"
-REGION="${REGION:-us-central1}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DRY_RUN="${DRY_RUN:-0}"
+PROJECT_ID="${PROJECT_ID:-${DRY_RUN:+drawbridge-rehearsal}}"
 
-log()  { printf '[bootstrap] %s\n' "$*"; }
-skip() { printf '[bootstrap]   exists, skipping: %s\n' "$*"; }
-made() { printf '[bootstrap]   created: %s\n' "$*"; }
+TAG="bootstrap"
+# shellcheck source=infra/lib.sh
+. "${REPO_ROOT}/infra/lib.sh"
+require_project
 
-gc() { gcloud --project="${PROJECT_ID}" "$@"; }
+# The sub-scripts below are separate files with their own `PROJECT_ID:?` guards, so the values
+# have to be exported rather than merely set. A rehearsal found this: without the export the
+# first real run reaches the Firestore indexes and dies on a variable it can see in its parent.
+export PROJECT_ID REGION DRY_RUN
 
-log "project=${PROJECT_ID} region=${REGION}"
+log "project=${PROJECT_ID} region=${REGION}${DRY_RUN:+ dry_run=${DRY_RUN}}"
 
 # --- Preflight ----------------------------------------------------------------------------
 # Refuse to run against a project with no billing rather than failing halfway through with a
 # confusing API error.
-if ! gcloud beta billing projects describe "${PROJECT_ID}" --format='value(billingEnabled)' 2>/dev/null | grep -qi true; then
+if [ "${DRY_RUN}" = "1" ]; then
+  log "DRY RUN — nothing below is executed; billing preflight skipped"
+elif ! gcloud beta billing projects describe "${PROJECT_ID}" --format='value(billingEnabled)' 2>/dev/null | grep -qi true; then
   log "ERROR: billing is not enabled on ${PROJECT_ID}. Enable it and re-run."
   exit 1
 fi
@@ -71,7 +82,7 @@ TOPICS=(
 log "creating ${#TOPICS[@]} topics, their dead-letter counterparts and subscriptions"
 for t in "${TOPICS[@]}"; do
   for name in "${t}" "${t}.dlq"; do
-    if gc pubsub topics describe "${name}" >/dev/null 2>&1; then
+    if probe pubsub topics describe "${name}"; then
       skip "topic ${name}"
     else
       gc pubsub topics create "${name}" >/dev/null
@@ -81,14 +92,14 @@ for t in "${TOPICS[@]}"; do
 
   # The dead-letter subscription exists so a dead-lettered message is retained and visible;
   # without a subscription on the DLQ topic, a failed message is silently discarded.
-  if gc pubsub subscriptions describe "${t}.dlq.sub" >/dev/null 2>&1; then
+  if probe pubsub subscriptions describe "${t}.dlq.sub"; then
     skip "subscription ${t}.dlq.sub"
   else
     gc pubsub subscriptions create "${t}.dlq.sub" --topic="${t}.dlq" >/dev/null
     made "subscription ${t}.dlq.sub"
   fi
 
-  if gc pubsub subscriptions describe "${t}.sub" >/dev/null 2>&1; then
+  if probe pubsub subscriptions describe "${t}.sub"; then
     skip "subscription ${t}.sub"
   else
     gc pubsub subscriptions create "${t}.sub" \
@@ -107,7 +118,7 @@ BUCKET_BINDERS="${PROJECT_ID}-binders"
 
 log "creating buckets"
 for b in "${BUCKET_QUARANTINE}" "${BUCKET_CLEAN}" "${BUCKET_BINDERS}"; do
-  if gc storage buckets describe "gs://${b}" >/dev/null 2>&1; then
+  if probe storage buckets describe "gs://${b}"; then
     skip "bucket gs://${b}"
   else
     gc storage buckets create "gs://${b}" \
@@ -128,7 +139,7 @@ made "lifecycle rule on gs://${BUCKET_QUARANTINE} (delete after 7 days)"
 
 # --- Firestore ----------------------------------------------------------------------------
 log "creating Firestore in native mode"
-if gc firestore databases describe --database='(default)' >/dev/null 2>&1; then
+if probe firestore databases describe --database='(default)'; then
   skip "Firestore (default)"
 else
   gc firestore databases create --location="${REGION}" --type=firestore-native >/dev/null
@@ -158,7 +169,7 @@ log "creating Model Armor templates"
 
 # --- Artifact Registry --------------------------------------------------------------------
 log "creating the container repository"
-if gc artifacts repositories describe drawbridge --location="${REGION}" >/dev/null 2>&1; then
+if probe artifacts repositories describe drawbridge --location="${REGION}"; then
   skip "artifact repository drawbridge"
 else
   gc artifacts repositories create drawbridge \

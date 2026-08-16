@@ -466,3 +466,37 @@ def test_the_rubric_domain_type_matches_the_domain_tuple():
     from shared.domain import RUBRIC_DOMAINS, RubricDomain
 
     assert set(typing.get_args(RubricDomain)) == set(RUBRIC_DOMAINS)
+
+
+# --- The cloud call sites are isolated -----------------------------------------------------
+
+
+def test_every_cloud_backend_has_exactly_one_call_site():
+    """Each `TODO(verify)` should be a one-function change on the day a project exists, and the
+    way that stays true is that nothing else calls the backend. Asserted by import graph rather
+    than by discipline, because discipline is what erodes between milestones."""
+    import ast
+    import inspect
+
+    from shared import armor, memory
+
+    for module, needle, allowed in (
+        (armor, "modelarmor", {"_screen_with_service"}),
+        (memory, "VertexAiMemoryBankService", {"_write_to_memory_bank"}),
+    ):
+        tree = ast.parse(inspect.getsource(module))
+        callers = {
+            node.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and needle in ast.unparse(node)
+        }
+        assert callers == allowed, f"{needle} is reached from {sorted(callers)}"
+
+
+def test_the_cloud_checklist_names_a_function_for_every_step():
+    """A checklist step that could not say what changes when it is answered would be a step
+    somebody has to think about twice."""
+    from scripts.cloud_checklist import steps
+
+    for step in steps():
+        assert step.closes and step.verifies, step.title

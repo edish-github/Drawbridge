@@ -7,10 +7,13 @@
 
 set -euo pipefail
 
-PROJECT_ID="${PROJECT_ID:?PROJECT_ID must be set}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+TAG="iam"
+# shellcheck source=infra/lib.sh
+. "${REPO_ROOT}/infra/lib.sh"
+require_project
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
-log() { printf '[iam] %s\n' "$*"; }
 
 MATRIX="${REPO_ROOT}/infra/iam/permission-matrix.yaml"
 
@@ -27,10 +30,10 @@ PY
 while IFS=$'\t' read -r name display; do
   [[ -z "${name}" ]] && continue
   email="${name}@${PROJECT_ID}.iam.gserviceaccount.com"
-  if gcloud --project="${PROJECT_ID}" iam service-accounts describe "${email}" >/dev/null 2>&1; then
+  if probe iam service-accounts describe "${email}"; then
     log "  exists, skipping: ${name}"
   else
-    gcloud --project="${PROJECT_ID}" iam service-accounts create "${name}" \
+    gc iam service-accounts create "${name}" \
       --display-name="${display}" >/dev/null
     log "  created: ${name}"
   fi

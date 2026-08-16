@@ -114,17 +114,8 @@ def recall_dossier(vendor_id: str) -> Dossier:
         Nothing. An unavailable memory service returns an empty dossier with a degraded-mode
         warning; a review opening without prior context is worse-informed, not incorrect.
     """
-    from google.cloud.firestore_v1 import FieldFilter
-
     try:
-        docs = (
-            firestore_client()
-            .collection(COLLECTION_DOSSIERS)
-            .where(filter=FieldFilter("vendor_id", "==", vendor_id))
-            .where(filter=FieldFilter("superseded", "==", False))
-            .stream()
-        )
-        notes = [MemoryNote.model_validate(d.to_dict()["note"]) for d in docs]
+        notes = _read_notes(vendor_id)
     except Exception as exc:  # noqa: BLE001 — recall is context, not a control
         log.warning("degraded mode: dossier recall unavailable for %s: %s", vendor_id, exc)
         return Dossier(vendor_id=vendor_id)
@@ -152,18 +143,93 @@ def remember(vendor_id: str, note: MemoryNote) -> str:
     if note.supersedes:
         mark_superseded(vendor_id, note.supersedes)
 
-    doc = firestore_client().collection(COLLECTION_DOSSIERS).document()
-    doc.set(
-        {
-            "vendor_id": vendor_id,
-            "note": note.model_dump(mode="json"),
-            "superseded": False,
-            "written_at": datetime.now(UTC).isoformat(),
-            "backend": "firestore" if settings().is_local else "memory_bank",
-        }
-    )
+    note_id = _write_note(vendor_id, note)
     log.info("remembered %s note for vendor=%s (%s)", note.type, vendor_id, note.provenance)
+    return note_id
+
+
+# --- the backend seam ---------------------------------------------------------------------
+#
+# Two functions, and every call to a memory backend in the system goes through one of them. The
+# guard above runs before either is reached, so which backend is in use has no bearing on what
+# is admitted — and the ``TODO(verify)`` on Memory Bank's payload shape is a change to
+# ``_write_note`` rather than a sweep through the module.
+
+
+def _write_note(vendor_id: str, note: MemoryNote) -> str:
+    """Persist one validated note and return its id. The only memory write in the system."""
+    if settings().is_cloud:
+        return _write_to_memory_bank(vendor_id, note)
+
+    doc = firestore_client().collection(COLLECTION_DOSSIERS).document()
+    doc.set(_document(vendor_id, note, backend="firestore"))
     return doc.id
+
+
+def _read_notes(vendor_id: str) -> list[MemoryNote]:
+    """Return a vendor's current notes. The only memory read in the system."""
+    from google.cloud.firestore_v1 import FieldFilter
+
+    docs = (
+        firestore_client()
+        .collection(COLLECTION_DOSSIERS)
+        .where(filter=FieldFilter("vendor_id", "==", vendor_id))
+        .where(filter=FieldFilter("superseded", "==", False))
+        .stream()
+    )
+    return [MemoryNote.model_validate(d.to_dict()["note"]) for d in docs]
+
+
+def _write_to_memory_bank(vendor_id: str, note: MemoryNote) -> str:
+    """Write to Vertex AI Memory Bank, and to Firestore as the queryable index.
+
+    Both, not either. Memory Bank is a semantic store and ``recall_dossier`` asks a structural
+    question — every current note for one vendor, by type — which is a query rather than a
+    search. The Firestore copy is what answers it; the Memory Bank copy is what makes the
+    hierarchy's third layer the service the architecture names rather than a collection wearing
+    its badge.
+
+    TODO(verify): whether ``add_memory`` accepts a structured fact payload directly or requires
+    a session-shaped wrapper. This function is the only place that call is made, so confirming
+    it is a one-function change. Until it is confirmed, a failure here logs and leaves the
+    Firestore write standing — losing the semantic copy degrades recall quality, and losing the
+    structural copy would lose the dossier.
+    """
+    doc = firestore_client().collection(COLLECTION_DOSSIERS).document()
+    doc.set(_document(vendor_id, note, backend="memory_bank"))
+
+    try:
+        from google.adk.memory import VertexAiMemoryBankService
+
+        cfg = settings()
+        service = VertexAiMemoryBankService(
+            project=cfg.project_id,
+            location=cfg.region,
+            agent_engine_id=cfg.agent_engine_id,
+        )
+        service.add_memory(
+            scope={"vendor_id": vendor_id},
+            fact=note.model_dump(mode="json"),
+        )
+    except Exception as exc:  # noqa: BLE001 — see the docstring on why this degrades
+        log.warning(
+            "degraded mode: the Memory Bank copy of a %s note for %s was not written (%s). "
+            "The dossier is intact; semantic recall is not.",
+            note.type,
+            vendor_id,
+            exc,
+        )
+    return doc.id
+
+
+def _document(vendor_id: str, note: MemoryNote, *, backend: str) -> dict:
+    return {
+        "vendor_id": vendor_id,
+        "note": note.model_dump(mode="json"),
+        "superseded": False,
+        "written_at": datetime.now(UTC).isoformat(),
+        "backend": backend,
+    }
 
 
 def mark_superseded(vendor_id: str, note_id: str) -> None:

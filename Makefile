@@ -1,4 +1,4 @@
-.PHONY: help bootstrap rules emulators emulators-stop seed reset run-local dev-ui open-review \
+.PHONY: help bootstrap bootstrap-dry rules emulators emulators-stop seed reset run-local dev-ui open-review \
         deploy demo demo-fixtures demo-crash demo-second binder dashboard teardown test lint probe
 
 PYTHON ?= python
@@ -9,6 +9,11 @@ help:           ## list available targets
 
 bootstrap:      ## enable APIs, create topics, buckets, firestore, IAM, armor templates
 	./infra/bootstrap.sh
+
+# The first real run should not also be the first run. Prints every gcloud command the real
+# bootstrap would issue, in order, without a project and without touching anything.
+bootstrap-dry:  ## rehearse the bootstrap: print every command, execute none
+	DRY_RUN=1 ./infra/bootstrap.sh
 
 # The rules are generated from the permission matrix rather than hand-written, so the table in
 # the README and the ruleset the emulator enforces cannot drift apart. Regenerating before the

@@ -76,6 +76,13 @@ class Settings(BaseModel):
     # Required in cloud mode; unused in local mode, where the emulators need no project.
     project_id: str | None = None
     region: str = "us-central1"
+    agent_engine_id: str | None = None
+    """The deployed Agent Engine instance durable memory is scoped to.
+
+    Cloud mode only, and unset until ``make deploy`` has run once — a Memory Bank write before
+    an Agent Engine exists has nowhere to go, which is why the write degrades rather than
+    raising.
+    """
 
     # Required in local mode. Never logged, never written to a span, never sent anywhere but
     # the Gemini API endpoint.
