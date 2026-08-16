@@ -1,7 +1,7 @@
 {
   "vendor_id": "cleancloud",
   "role": "control",
-  "purpose": "Calibrates the scoring path and proves the happy path. A finding raised against CleanCloud is a false positive, and the tests treat it as one.",
+  "purpose": "Calibrates the scoring path and proves the happy path. A high-severity finding, a contradiction or an Adversarial Conduct flag raised against CleanCloud is a false positive, and the tests treat it as one. Three minor gaps are expected and are the point: a vendor that scores exactly 100 reads as a fixture built to pass rather than as a vendor that passed.",
   "final_state": "gated",
   "gate_scope": "decision",
   "tier": {
@@ -10,7 +10,8 @@
     "retier_expected": false
   },
   "score": {
-    "min": 80,
+    "min": 88,
+    "max": 94,
     "band": "approve"
   },
   "flags": {
@@ -24,19 +25,48 @@
     "all_critical_filters_executed": true
   },
   "findings": {
-    "max_total": 1,
+    "max_total": 3,
     "forbidden_domains": ["conduct"],
     "forbidden_severities": ["high"],
     "must_not_contain_contradiction": true
   },
+  "required_findings": [
+    {
+      "id": "backup_deletion_tail",
+      "domain": "data_protection",
+      "severity": "medium",
+      "contradiction": false,
+      "source": "model",
+      "claim_ref": "DP02",
+      "note": "The answer and the retention policy agree: deletion runs nightly against primary storage and backups reach full expiry 35 days later. Nothing is contradicted and the vendor discloses it unprompted. It is recorded because a record remains recoverable for 35 days after a deletion request and no evidence names the contractual window that tail is measured against."
+    },
+    {
+      "id": "assurance_criteria_exclude_privacy",
+      "domain": "compliance_posture",
+      "severity": "low",
+      "contradiction": false,
+      "source": "model",
+      "claim_ref": "CP02",
+      "note": "The report covers Security, Availability and Confidentiality. Privacy and Processing Integrity were not in scope for the period. The answer is accurate about what the report covers; what is absent is assurance over the two criteria that were not tested."
+    },
+    {
+      "id": "offboarding_deletion_observation",
+      "domain": "access_control",
+      "severity": "low",
+      "contradiction": false,
+      "source": "model",
+      "claim_ref": "CP03",
+      "note": "Observation 2 of the report records two offboarded contractor accounts disabled but not deleted inside the documented 30-day window. Both were remediated within the period and neither had access after disablement, so this is recorded at low rather than dismissed."
+    }
+  ],
   "subprocessors": {
     "extracted_count": 3,
     "unknown_processing_customer_data": 0
   },
   "assertions": [
-    "Trust Score is at least 80 and the band is approve.",
+    "Trust Score lands between 88 and 94 and the band is approve, comfortably clear of the 80 boundary.",
     "No Adversarial Conduct flag is raised on the review or the vendor record.",
-    "No finding carries contradiction=true.",
+    "No finding carries contradiction=true and none is high severity.",
     "Every critical Model Armor filter reports EXECUTION_SUCCESS, so a clean-stamp is issued for every document.",
     "The ISO certificate expiry is in the future, so the deterministic expiry check produces no finding.",
     "The SOC 2 report period ends inside the last 12 months, so the staleness check produces no finding.",

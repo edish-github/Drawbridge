@@ -28,6 +28,31 @@ from shared.domain import Finding
 REPO = Path(__file__).resolve().parent.parent
 PACK = REPO / "synthetic-vendors"
 
+MARGIN = 4
+"""Points a score must sit inside its band at every boundary the band has.
+
+A vendor sitting on 60.00 is in the conditional band and is one medium finding away from not
+being. Asserting the band alone would let a later change to a finding set reclassify a vendor
+silently, and the reclassification is the thing that would break the demo rather than the
+arithmetic. This is the assertion that fails first.
+"""
+
+
+def band_bounds(band: str) -> tuple[float, float]:
+    """Return the inclusive score range a band covers."""
+    bands = load_rubric().bands
+    return {
+        "approve": (bands["approve"], 100.0),
+        "conditional": (bands["conditional"], bands["approve"] - 1),
+        "escalate": (0.0, bands["conditional"] - 1),
+    }[band]
+
+
+def assert_inside_band(score: int, band: str) -> None:
+    low, high = band_bounds(band)
+    assert score - low >= MARGIN, f"{score} is within {MARGIN} of the bottom of {band} ({low})"
+    assert high - score >= MARGIN, f"{score} is within {MARGIN} of the top of {band} ({high})"
+
 
 def pack(slug: str) -> tuple[dict, dict]:
     """Return one vendor's profile and expectations."""
@@ -73,12 +98,14 @@ def score_for(slug: str, *, adversarial: bool | None = None):
 
 
 def test_cleancloud_approves():
-    """A finding raised against CleanCloud is a false positive, and the pack treats it as one."""
+    """The control vendor. Three minor gaps and nothing worse, which is what a good vendor looks
+    like — a hundred out of a hundred reads as a fixture built to pass rather than as a pass."""
     result = score_for("cleancloud")
     _, expected = pack("cleancloud")
 
-    assert result.score >= expected["score"]["min"]
+    assert expected["score"]["min"] <= result.score <= expected["score"]["max"]
     assert result.band == "approve"
+    assert_inside_band(result.score, "approve")
 
 
 def test_cleancloud_still_approves_at_the_worst_it_is_allowed_to_be():
@@ -109,6 +136,7 @@ def test_datadynamo_is_conditional():
 
     assert expected["score"]["min"] <= result.score <= expected["score"]["max"]
     assert result.band == "conditional"
+    assert_inside_band(result.score, "conditional")
 
 
 def test_nimbuswrite_escalates():
@@ -117,6 +145,18 @@ def test_nimbuswrite_escalates():
 
     assert result.score <= expected["score"]["max"]
     assert result.band == "escalate"
+    assert_inside_band(result.score, "escalate")
+
+
+def test_the_arithmetic_alone_puts_nimbuswrite_in_trouble():
+    """A vendor the modifier rescues from an approve band would make the -25 look like the whole
+    story. The evidence has to say the same thing the conduct flag says, only more quietly."""
+    arithmetic = score_for("nimbuswrite", adversarial=False)
+    _, expected = pack("nimbuswrite")
+    declared = expected["score"]["arithmetic_before_modifier"]
+
+    assert declared["min"] <= arithmetic.score <= declared["max"]
+    assert arithmetic.band == declared["band"]
 
 
 def test_nimbuswrite_escalates_because_escalation_was_forced():

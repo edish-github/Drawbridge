@@ -12,10 +12,15 @@
   },
   "score": {
     "band": "escalate",
-    "max": 59,
+    "max": 50,
+    "arithmetic_before_modifier": {
+      "min": 66,
+      "max": 74,
+      "band": "conditional"
+    },
     "adversarial_penalty_applied": 25,
     "band_forced": true,
-    "note": "The band is escalate regardless of the arithmetic. The 25 points are deducted after the domain arithmetic, and the Trust Score falls: prose may say the vendor raised your risk, the number always goes down."
+    "note": "The band is escalate regardless of the arithmetic. The 25 points are deducted after the domain arithmetic, and the Trust Score falls: prose may say the vendor raised your risk, the number always goes down. The arithmetic alone reaches conditional, not escalate — a vendor already in trouble on its own evidence, which the conduct flag then takes out of the running."
   },
   "flags": {
     "adversarial_conduct": true,
@@ -63,6 +68,24 @@
       "note": "The audit report states the third-party inference layer is out of scope, and the inference layer is where customer text is processed."
     },
     {
+      "id": "model_provider_terms_unreviewable",
+      "domain": "data_protection",
+      "severity": "medium",
+      "contradiction": false,
+      "source": "model",
+      "claim_ref": "AI02",
+      "note": "Customer text is transmitted to Veritas Lumen Models, and the agreement governing what that provider may do with it is available only under NDA. The text leaves the vendor's control under terms the buyer cannot read, so the processing cannot be assessed in this review. Not a contradiction: the vendor states the position plainly."
+    },
+    {
+      "id": "training_exclusion_covers_only_own_models",
+      "domain": "ai_specific",
+      "severity": "medium",
+      "contradiction": false,
+      "source": "model",
+      "claim_ref": "AI01",
+      "note": "The exclusion is scoped to 'our own models'. The AI data use policy is silent on whether the model provider may use transmitted content for training, and no contractual exclusion is evidenced. The narrow wording is accurate, which is what makes the gap a gap rather than a contradiction."
+    },
+    {
       "id": "mfa_gap_not_contradiction",
       "domain": "access_control",
       "severity": "medium",
@@ -75,7 +98,7 @@
     "Screening blocks the planted payload before any generative model receives it.",
     "The Adversarial Conduct flag is raised on both the review and the vendor record.",
     "The Trust Score is 25 points below the same review scored without the payload.",
-    "The band is escalate, and it is escalate because escalation was forced rather than because the arithmetic reached it.",
+    "The band is escalate, and it is escalate because escalation was forced rather than because the arithmetic reached it. The arithmetic alone reaches conditional.",
     "A conduct finding exists whose summary names the Model Armor template and the filter that fired.",
     "The blocked excerpt is stored as inert evidence and appears in the binder.",
     "The blocked excerpt appears in no prompt anywhere in the run.",

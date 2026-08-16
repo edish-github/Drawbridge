@@ -15,8 +15,8 @@
   },
   "score": {
     "band": "conditional",
-    "min": 60,
-    "max": 79
+    "min": 64,
+    "max": 70
   },
   "flags": {
     "adversarial_conduct": false
@@ -58,26 +58,28 @@
     {
       "id": "report_period_stale",
       "domain": "compliance_posture",
-      "severity": "medium",
+      "severity": "low",
       "contradiction": false,
       "source": "rule",
-      "note": "The report period ended 30 June 2025, more than 12 months before the review date."
+      "note": "The report period ended 30 June 2025, one month past the 12-month currency threshold. Severity is graded on the overrun: a report a month out of date and one three years out of date are not the same finding, and nothing in this report records a control that failed."
     },
     {
       "id": "no_dr_test_in_period",
       "domain": "business_continuity",
-      "severity": "medium",
+      "severity": "low",
       "contradiction": false,
       "source": "model",
       "claim_ref": "BC01",
-      "note": "The answer states an RTO of 8 hours and a last recovery test 'in 2024'. The DR test report records eleven hours against an eight-hour target, so the objective was not met and the evidence is older than the annual cycle the tier implies. A gap, not a contradiction: nothing in the evidence refutes the stated objective, it simply was not achieved."
+      "note": "The answer states an RTO of 8 hours and a last recovery test 'in 2024'. Section 7 of the report records that no recovery test was performed during the period and that the most recent one on record predates it. A currency gap rather than a control failure: the objective is stated and undisputed, and what is missing is evidence that it was ever exercised."
     }
   ],
   "followups": {
-    "expected_count": 1,
-    "on_question": "DP01",
-    "reason": "The encryption answer is a non-answer below the confidence threshold, so one targeted follow-up quotes it back and names the evidence required.",
-    "must_not_exceed_cap": 2
+    "expected_count": 4,
+    "on_questions": ["DP01", "AC02", "AC03", "CP03"],
+    "hero_question": "DP01",
+    "reason": "Four answers land below the confidence threshold, so each draws one targeted follow-up that quotes the vendor's own words back and names the evidence required. DP01 is the one the demo reads out: 'We follow industry best practice for encryption both at rest and in transit' is the exact non-answer that makes manual chasing the pain this project removes.",
+    "must_not_exceed_cap": 2,
+    "must_not_block_coverage": true
   },
   "subprocessors": {
     "extracted_count": 4,
@@ -89,8 +91,9 @@
     "The expired certificate finding carries source=rule, not source=model.",
     "The review re-tiers from 2 to 1, plan_version becomes 2, and a TierChange records the answer that caused it.",
     "Questions carried over from plan v1 are not re-sent: the vendor receives the original set plus the new domain's set, and nothing twice.",
-    "Exactly one targeted follow-up is sent for DP01, and never more than the cap.",
-    "The band is conditional.",
+    "Exactly one targeted follow-up is sent for DP01, quoting the vendor's own answer, and never more than the cap.",
+    "A follow-up outstanding on DP01 does not stop the review reaching the coverage threshold.",
+    "The band is conditional, and the score sits at least four points inside it at both ends.",
     "No Adversarial Conduct flag is raised."
   ]
 }

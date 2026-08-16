@@ -35,6 +35,15 @@ log = logging.getLogger("drawbridge.checks")
 STALE_REPORT_MONTHS = 12
 SEVERITIES = ("low", "medium", "high")
 
+STALENESS_GRADES = ((6, "low"), (24, "medium"))
+"""Months past the currency threshold, and the severity each overrun earns.
+
+A report one month out of date and one three years out of date are not the same finding, and
+charging both at the same severity is the kind of flat rule that makes a score argue badly. The
+grade is on the overrun rather than on the age, so the threshold stays the single place the
+currency expectation is stated. Beyond the last boundary the severity is high.
+"""
+
 _CERTIFICATE_HINTS = ("certificate", "cert", "iso")
 _REPORT_HINTS = ("soc", "report", "assurance", "audit")
 
@@ -127,14 +136,16 @@ def _report_checks(
     else:
         months = age_months(doc.report_period_end, today=today)
         if months > STALE_REPORT_MONTHS:
+            overrun = months - STALE_REPORT_MONTHS
             findings.append(
                 rule_finding(
                     review_id,
                     "compliance_posture",
-                    "medium",
+                    staleness_severity(overrun),
                     f"The report period in {doc.name} ended "
                     f"{doc.report_period_end.isoformat()}, {months} months before this review "
-                    f"and beyond the {STALE_REPORT_MONTHS}-month currency threshold.",
+                    f"and {overrun} month(s) beyond the {STALE_REPORT_MONTHS}-month currency "
+                    "threshold.",
                     evidence_ref=doc.doc_ref,
                 )
             )
@@ -238,6 +249,14 @@ def covers(scope: str | None, service: str) -> bool:
     if not wanted:
         return True
     return wanted.issubset(_significant_words(scope))
+
+
+def staleness_severity(overrun_months: int) -> str:
+    """Return the severity for a report period this many months past the threshold."""
+    for boundary, severity in STALENESS_GRADES:
+        if overrun_months <= boundary:
+            return severity
+    return "high"
 
 
 def age_months(d: date, *, today: date) -> int:
