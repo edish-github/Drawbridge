@@ -90,7 +90,7 @@ def test_a_stub_verdict_is_labelled_and_never_trustworthy():
     result = _screen_with_stub("anything", "drawbridge-untrusted", "x")
 
     assert result.template == STUB_TEMPLATE
-    assert result.is_stub
+    assert result.is_untrusted
     assert not verdict_is_trustworthy(result)
     assert set(result.skipped_filters()) == {"pi_and_jailbreak", "malicious_uris", "sdp"}
 
