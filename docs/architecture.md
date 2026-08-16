@@ -17,10 +17,23 @@ the record of what moved and why.
 | Risk Scorer | `sa-scorer` | Rubric arithmetic and the memo |
 | Watchdog | `sa-watchdog` | Post-approval sweeps and linked re-reviews |
 
-They never call each other. Every arrow between them is one of twelve Pub/Sub topics, delivered
-at-least-once and unordered, with a dead-letter path to `NEEDS_HUMAN` after five attempts. A
-consumer checks review state before acting, so a reply arriving after `SCORED` attaches as an
-addendum and reopens the score rather than being dropped or applied out of order.
+**ADK 2 builds the agents; Pub/Sub orchestrates them.** The planning documents describe a graph
+workflow, and that is not what this is. Each agent is an ADK `LlmAgent` with its own instruction,
+tools and output schema — that part is as designed — but nothing composes them into a graph.
+They never call each other and no process holds the fleet's position in a review.
+
+The reason is the one the whole design rests on: **any agent can crash without stalling the
+fleet.** A graph runner is a place for the review to live, and a place for the review to live is
+a process whose death loses it. Here the review's position is a checkpointed row in Firestore
+and the next step is an unacknowledged message, so a worker killed mid-send is replaced by
+another worker that reads the same two things and carries on. `make demo-crash` is that sentence
+executed rather than asserted. It is also why there is no `scripts/graph_dump.py` and no diagram
+23: there is no graph to dump, and a picture the repository cannot produce is not one to fake.
+
+Every arrow between agents is one of twelve Pub/Sub topics, delivered at-least-once and
+unordered, with a dead-letter path to `NEEDS_HUMAN` after five attempts. A consumer checks review
+state before acting, so a reply arriving after `SCORED` attaches as an addendum and reopens the
+score rather than being dropped or applied out of order.
 
 ![The fleet on one page](diagrams/svg/02-fleet-overview.svg)
 

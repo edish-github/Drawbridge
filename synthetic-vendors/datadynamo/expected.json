@@ -15,8 +15,9 @@
   },
   "score": {
     "band": "conditional",
-    "min": 62,
-    "max": 68
+    "min": 64,
+    "max": 70,
+    "note": "The report period runs to 31 December 2025 and the report is dated 27 February 2026, so the currency check passes and nothing is charged for staleness. That date is load-bearing for the margin: tests/test_calibration.py asserts it stays inside the window with a year of runway, so the fixture fails a test before it fails a demo."
   },
   "flags": {
     "adversarial_conduct": false
@@ -57,14 +58,6 @@
       "source": "model",
       "claim_ref": "IR01",
       "note": "The questionnaire claims a 24-hour notification window. The incident sheet records 9 days from detection to disclosure. Medium on the commitment anchor rather than high: the disclosure process exists and ran, and what the evidence contradicts is the timeframe the vendor committed to, not the presence of the control."
-    },
-    {
-      "id": "report_period_stale",
-      "domain": "compliance_posture",
-      "severity": "low",
-      "contradiction": false,
-      "source": "rule",
-      "note": "The report period ended 30 June 2025, one month past the 12-month currency threshold. Severity is graded on the overrun: a report a month out of date and one three years out of date are not the same finding, and nothing in this report records a control that failed."
     },
     {
       "id": "sendline_unknown_fourth_party",

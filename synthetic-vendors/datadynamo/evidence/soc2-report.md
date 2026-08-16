@@ -7,10 +7,10 @@ issued by any real audit firm.**
 |---|---|
 | Service organisation | DataDynamo Logistics GmbH |
 | Report type | Type II |
-| Report period | 1 July 2024 – 30 June 2025 |
+| Report period | 1 January 2025 – 31 December 2025 |
 | Auditor | Kestrel Assurance Partners (fictional) |
 | Opinion | Qualified |
-| Report date | 29 August 2025 |
+| Report date | 27 February 2026 |
 
 ## 1. Scope
 

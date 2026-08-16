@@ -23,7 +23,7 @@ flowchart TB
     TOPICS["review.intake · review.plan_ready · review.chase_due · vendor.reply_received<br/>vendor.evidence_uploaded · evidence.screened · review.findings_ready · review.score_ready<br/>review.approved · review.rescore · watchdog.sweep · watchdog.hit"]
   end
 
-  subgraph Z4["④ AGENT RUNTIME · Vertex AI Agent Engine · ADK 2 graph workflow · one service-account identity per agent"]
+  subgraph Z4["④ AGENT RUNTIME · ADK 2 agents on Vertex AI Agent Engine · orchestrated by Pub/Sub, not by a graph runner · one identity each"]
     direction LR
     ORC["<b>Orchestrator</b><br/>sa-orchestrator<br/>tier · plan · re-tier · dispatch · gate"]
     QA["<b>Questionnaire</b><br/>sa-questionnaire<br/>generate · send · parse · chase"]

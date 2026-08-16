@@ -17,7 +17,7 @@ flowchart TB
 
   subgraph RUNTIME["GOOGLE CLOUD RUNTIME — one region for everything"]
     direction LR
-    AE["<b>Vertex AI Agent Engine</b><br/>ADK 2 graph workflow · five agents, five identities<br/>plus sa-armor for the screening pipeline<br/>long-running, resumable"]
+    AE["<b>Vertex AI Agent Engine</b><br/>five ADK 2 agents, five identities<br/>plus sa-armor for the screening pipeline<br/>no graph runner holds the review — position is a<br/>checkpoint and an unacknowledged message"]
     CR1["<b>Cloud Run</b> · dashboard"]
     CR2["<b>Cloud Run</b> · vendor portal"]
     CR3["<b>Cloud Run</b> · inbox simulator"]

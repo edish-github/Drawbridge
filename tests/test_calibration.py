@@ -182,6 +182,43 @@ def test_the_three_vendors_land_in_three_different_bands():
     assert len(set(bands.values())) == 3, bands
 
 
+RUNWAY_DAYS = 120
+"""How far ahead the fixture dates must still hold.
+
+DataDynamo's six-point margin depends on its report period passing the twelve-month currency
+check, and that check compares against ``date.today()``. So the margin is a function of *when
+the demo is run* — the fixture rots on a calendar nobody is watching, and the symptom is a
+vendor quietly losing two points and landing on its band boundary, on camera.
+
+Four months rather than a year, because a year is not available without moving the whole pack's
+internal chronology and the pack is coherent as it stands: a report period ending 31 December
+2025, a report dated 27 February 2026, an incident in March 2025 and a subprocessor list current
+as of 1 February 2026 are one company's documents. Four months is the honest number this
+arrangement supports, and it is stated rather than assumed.
+"""
+
+
+def test_the_fixture_dates_do_not_rot_before_the_demo_does():
+    """A fixture whose dates go stale with wall time fails a test, never a demo."""
+    from datetime import date, timedelta
+
+    from agents.evidence.checks import STALE_REPORT_MONTHS, age_months
+
+    period_end = date(2025, 12, 31)
+    horizon = date.today() + timedelta(days=RUNWAY_DAYS)
+
+    assert age_months(period_end, today=horizon) <= STALE_REPORT_MONTHS, (
+        f"DataDynamo's SOC 2 report period goes stale within {RUNWAY_DAYS} days, which will "
+        "cost it two points and put it on its band boundary. Move the period and the report "
+        "date forward in synthetic-vendors/datadynamo/evidence/soc2-report.md, and move the "
+        "subprocessor list and incident history with them so the pack stays one company's "
+        "documents."
+    )
+    assert "31 December 2025" in (
+        PACK / "datadynamo" / "evidence" / "soc2-report.md"
+    ).read_text(), "the date above is pinned here and in the fixture; they have drifted apart"
+
+
 @pytest.mark.parametrize("slug", ["cleancloud", "datadynamo", "nimbuswrite"])
 def test_every_declared_finding_reaches_the_score(slug):
     """A finding the rubric cannot map would be a silently wrong number, which is the one
