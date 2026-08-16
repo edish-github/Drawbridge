@@ -1,0 +1,23 @@
+{
+  "name": "drawbridge-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Read-only operator view over the review ledger. Local mode only.",
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^7.11.0",
+    "next": "^15.5.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.1.0",
+    "typescript": "^5.7.0"
+  }
+}

@@ -83,6 +83,61 @@ memo). The daily cap is 20. A live end-to-end run is therefore impossible on the
 regardless of cost, which makes billing a prerequisite for measuring the per-review figure
 rather than a nicety.
 
+## A08 · The contradiction multiplier is removed; severity carries it alone
+
+**Documents affected:** Appendix B and diagram 10, wherever a contradiction multiplier appears.
+
+**What the code does:** `rubric.yaml` declares no `contradiction_multiplier`, and `load_rubric`
+raises if one reappears. A contradiction costs exactly what its severity costs. The
+`contradiction` flag stays on the finding and drives the binder, the badge and the finding text.
+
+**Why:** the severity anchors the Evidence agent judges against already define *high* as "a
+control the vendor claims is in place is contradicted by their own evidence". Multiplying again
+charges the same fact twice. "No fact is priced twice" is defensible under questioning in a way
+that "we set it to 1.5" is not. The measured consequence: DataDynamo moves from escalate to
+conditional, which is what the three-vendor calibration needs.
+
+## A09 · The score is computed over the domains the review asked about
+
+**Documents affected:** anywhere the tier profile is described as the scoring domain set.
+
+**What the code does:** `compute_score` takes the domain list from the review's checkpointed
+plan and renormalises over it. `planner.domains_for` drops `ai_specific` for a vendor that is
+not an AI service, so it is neither asked about nor scored.
+
+**Why:** the Tier 1 profile includes `ai_specific`, and DataDynamo is a freight company. Scoring
+the nominal profile awarded it ten out of ten in a domain nobody put a question to — a free ten
+points, and a number that cannot be defended out loud. What is scored is now what was asked.
+
+## A10 · P1 gates first contact, not every message
+
+**Documents affected:** anywhere P1 is described as requiring a token per outbound email.
+
+**What the code does:** `verify_approval_token` passes without a token when a spend record
+already exists for this review and this recipient. A different address on the same review is
+unauthorised and still needs its own approval.
+
+**Why:** G2 is *first* outbound contact, and the policy text already said "no outbound email to a
+**new contact**". The chase rounds, the targeted follow-up and the additional questions a
+re-tier produces are the same authorised conversation; re-approving each would make the gate
+noise rather than a control. The narrowness is the point — a vendor contact that changed
+mid-review is the case the check protects against, and it is still caught.
+
+## A11 · P2 is enforced in the router, not at the tool gateway
+
+**Documents affected:** §6.4 and the diagrams, which place all three policies at
+`gateway.call_tool`.
+
+**What the code does:** `routing.generate` applies P2 to every task in
+`EXTERNAL_INPUT_TASKS`, verifying a stamp per named source before the model is reached, and
+parks the review on a refusal. P1 and P3 stay at the tool gateway.
+
+**Why:** `call_tool` is for effects on the world and a model call is not one, so routing prompts
+through it to reach the policy would blur a boundary that is currently clean. Since nothing
+reaches a model except through `generate`, the router is the only place the claim can be made
+true. Before this, *"no external content reaches a model without a verified stamp"* was in the
+architecture document, in the diagrams and in the narration, and was enforced nowhere.
+
 ## A06 · Review-state ownership is narrowed to forward transitions
 
 **Documents affected:** anywhere the Orchestrator is described as the only component that

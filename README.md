@@ -81,21 +81,70 @@ interactively; it does not consume the event backbone.
 
 ```
 make emulators
-make seed
+make reset                          # clears prior runs; `make seed` alone keeps them
 make demo-fixtures VENDOR=datadynamo
+make dashboard                      # in a second terminal: localhost:3000
 ```
 
-Eleven beats, asserted rather than hoped for: intake → Tier 2 with a stated reason → plan
-checkpointed → questionnaire built → **P1 refuses** → contact gate → approval → exactly one
-email → replies parsed incrementally → evidence retrieved and cross-examined → Trust Score with
-a per-domain breakdown → memo → **decision gate** → approval → decided.
+Fourteen beats, asserted rather than hoped for: intake → Tier 2 with a stated reason → plan
+checkpointed → questionnaire built → **P1 refuses** → contact gate → approval → one email →
+replies parsed incrementally → **the vendor's own answer re-tiers the review to Tier 1** → the
+additional questions go out and nothing is asked twice → coverage reaches 93% → evidence
+retrieved and cross-examined → Trust Score 60, conditional, with a per-domain breakdown → memo →
+**decision gate** → approval → decided → audit binder rendered.
 
 `demo-fixtures` answers every model call from the vendor pack, so it is free, deterministic and
 runs in CI. `make demo` runs the same script against the live models and needs API quota — the
 Gemini API free tier caps `gemini-3.5-flash` at 20 requests per day and a full review makes
 about thirty.
 
-Replay either one: same Trust Score, same findings, one email, idempotent skips logged.
+Both targets set `DRAWBRIDGE_ALLOW_UNSCREENED=1`, and that is not a convenience. Local mode has
+no Model Armor, so the demo runs on evidence seeded straight into the clean bucket, and **policy
+P2 refuses it** — no external content reaches a model without a verified, verdict-bearing
+stamp:
+
+```
+P2 REJECTED · local-seed v0 · verdict_not_trustworthy · task=parse_reply
+review=... parked — P2: local-seed 0 · no match inadmissible to parse_reply
+```
+
+The flag admits content that declared what it is, and nothing else: a source with no stamp is
+refused whatever it is set to, and cloud mode ignores the variable entirely. Every review it
+produces carries `unscreened_fixtures=true`, the worker prints a banner, and the binder says so
+on its cover. Run the demo without it to watch the refusal.
+
+Replay either one: same Trust Score, same findings, same re-tier, idempotent skips logged.
+
+## The audit binder
+
+```
+make binder REVIEW=<id>
+```
+
+Eight sections per the handbook's Appendix D — timeline with tier changes, questionnaire with
+parse provenance, evidence inventory with per-document per-filter verdicts and the template that
+produced them, findings with retrieval provenance and a `rule` or `model` label on each, the
+score arithmetic against 100, human decisions, the reasoning trace, and post-approval
+monitoring. HTML with a print stylesheet, rendered in about fifty milliseconds.
+
+**Rendered by a template, never by a model**, and the cover says so — asserted by an import
+graph, because a document that could be steered by the content it reports on is worse than no
+document.
+
+## The dashboard
+
+```
+make dashboard
+```
+
+Read-only over `reviews`, `dashboard_events`, `decisions` and `scores`. Three screens: the
+queue filtered to what needs a person, the review timeline with every entry expandable to the
+agent, goal, decision, trace id and idempotency key, and the gate card carrying the memo, the
+findings with their provenance labels and the per-domain arithmetic.
+
+The decision controls are inert by design. The dashboard holds no signing key and there is no
+write path in it — if a surface every operator can reach could mint an approval, the gateway
+refusing to sign would be decorative. The card names the command that issues the token instead.
 
 ## Synthetic data
 

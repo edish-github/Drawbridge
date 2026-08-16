@@ -299,14 +299,79 @@ def seed_filler(count: int, *, clock=None) -> list[str]:
     return ids
 
 
+RESETTABLE_COLLECTIONS = (
+    "reviews",
+    "events",
+    "decisions",
+    "dashboard_events",
+    "qa_responses",
+    "qa_responses_superseded",
+    "screenings",
+    "evidence_chunks",
+    "findings",
+    "scores",
+    "memos",
+    "inbox",
+    "idempotency",
+    "approvals",
+    "approval_tokens_spent",
+    "data_scope_classifications",
+    "inert_excerpts",
+    "subprocessors",
+)
+"""Collections a reset clears. Every one is review-scoped working state.
+
+``vendors`` is absent: a vendor record is a fixture rather than a run artefact, and clearing it
+would mean the next seed had to rebuild storage as well.
+
+A local emulator accumulates every review every test run ever created, and a queue holding a
+thousand of them is not a queue an operator would recognise — it is also the first thing a
+viewer sees on the dashboard. This is a fixture-loader convenience and it runs against the
+emulator only.
+"""
+
+
+def reset() -> int:
+    """Delete the working state of every review in the local emulator. Returns the count.
+
+    Raises:
+        RuntimeError: in cloud mode. There is no version of this that should ever run against a
+            real project, so it refuses rather than relying on nobody typing it.
+    """
+    cfg = settings()
+    if not cfg.is_local:
+        raise RuntimeError(
+            "reset deletes review state wholesale and runs against the emulator only; "
+            f"RUNTIME_MODE is {cfg.mode.value}"
+        )
+
+    db = firestore_client()
+    deleted = 0
+    for name in RESETTABLE_COLLECTIONS:
+        for doc in db.collection(name).stream():
+            doc.reference.delete()
+            deleted += 1
+
+    log.info("reset %d document(s) across %d collection(s)", deleted, len(RESETTABLE_COLLECTIONS))
+    return deleted
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--vendors", nargs="*", default=list(HERO_VENDORS))
     parser.add_argument("--filler", type=int, default=FILLER_COUNT)
     parser.add_argument("--compress", type=int, default=1)
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="clear every review's working state first; local emulator only",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="[seed] %(message)s")
+
+    if args.reset:
+        print(f"cleared {reset()} document(s) of prior review state")
 
     for slug in args.vendors:
         seed_vendor(slug)

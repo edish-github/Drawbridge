@@ -1,0 +1,432 @@
+/*
+ * The palette is the architecture diagrams' palette, deliberately. A judge who studied
+ * diagram 01 already knows what a red rule means when they see one on screen at 1:45, and the
+ * binder uses the same tokens, so the three artefacts read as one product.
+ *
+ * One accent. Blue is the only colour allowed on a non-semantic element — if everything is
+ * coloured, the red banner stops meaning anything.
+ *
+ * Light only. The product is light and the docs site is dark; two themes is two sets of bugs.
+ */
+
+:root {
+  --ink: #0f172a;
+  --mute: #64748b;
+  --faint: #94a3b8;
+  --line: #e2e8f0;
+  --shell: #f8fafc;
+  --accent: #1d4ed8;
+  --danger: #b91c1c;
+  --warn: #b45309;
+  --ok: #15803d;
+  --human: #c2410c;
+  --violet: #6d28d9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--shell);
+  color: var(--ink);
+  font: 400 13.5px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* Focus rings stay visible on every control. Suppressing one is never the fix. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 28px;
+}
+
+.topbar {
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+}
+.topbar-inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 14px 28px;
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+}
+.wordmark {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+.tagline {
+  color: var(--faint);
+  font-size: 12px;
+}
+
+h1 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0 0 4px;
+  letter-spacing: -0.01em;
+}
+h2 {
+  font-size: 15px;
+  font-weight: 700;
+  margin: 0 0 12px;
+}
+h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+p {
+  margin: 0 0 10px;
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 11.5px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px 22px;
+  margin-bottom: 18px;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 880fr) minmax(0, 476fr);
+  gap: 28px;
+  align-items: start;
+}
+@media (max-width: 1024px) {
+  .columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 6px 12px 6px 0;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+td {
+  padding: 10px 12px 10px 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+tr:last-child td {
+  border-bottom: 0;
+}
+.table-scroll {
+  overflow-x: auto;
+}
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid;
+  white-space: nowrap;
+}
+/* Colour is never the sole carrier of meaning: every pill has a word in it. */
+.pill-intake,
+.pill-questionnaire_out,
+.pill-replies_in,
+.pill-evidence_review {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.pill-gated {
+  color: var(--human);
+  border-color: var(--human);
+}
+.pill-needs_human {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.pill-scored,
+.pill-decided,
+.pill-monitored {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.pill-rule {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.pill-model {
+  color: var(--violet);
+  border-color: var(--violet);
+}
+.pill-high,
+.pill-contradiction {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+.pill-medium {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.pill-low {
+  color: var(--mute);
+  border-color: var(--mute);
+}
+.pill-approve {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.pill-conditional {
+  color: var(--warn);
+  border-color: var(--warn);
+}
+.pill-escalate {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.chips {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.chip {
+  padding: 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--mute);
+  font-size: 12px;
+  font-weight: 600;
+}
+.chip[data-active="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.banner {
+  padding: 12px 14px;
+  border: 1px solid var(--danger);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: var(--danger);
+  font-size: 12.5px;
+  margin-bottom: 18px;
+}
+
+/*
+ * The timeline. Expansion is a <details> element rather than a client component: the entry
+ * expands with no JavaScript at all, which means it also works in a screenshot, in print, and
+ * on the one machine where hydration failed five minutes before recording.
+ */
+.stream {
+  border-left: 2px solid var(--line);
+  padding-left: 18px;
+  margin-left: 6px;
+}
+.entry {
+  position: relative;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+.entry:last-child {
+  border-bottom: 0;
+}
+.entry::before {
+  content: "";
+  position: absolute;
+  left: -25px;
+  top: 17px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--line);
+  border: 2px solid #fff;
+}
+.entry[data-kind="reasoning"]::before {
+  background: var(--accent);
+}
+.entry[data-kind="tier_change"]::before {
+  background: var(--human);
+}
+.entry[data-kind="policy_block"]::before {
+  background: var(--danger);
+}
+.entry summary {
+  cursor: pointer;
+  list-style: none;
+  font-weight: 600;
+}
+.entry summary::-webkit-details-marker {
+  display: none;
+}
+.entry summary::after {
+  content: " ▸";
+  color: var(--faint);
+  font-weight: 400;
+}
+.entry details[open] summary::after {
+  content: " ▾";
+}
+.entry .when {
+  color: var(--faint);
+  font-size: 11.5px;
+}
+.entry .detail {
+  color: var(--mute);
+  margin-top: 2px;
+}
+.expanded {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--shell);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.expanded dl {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 4px 14px;
+  margin: 0;
+}
+.expanded dt {
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.expanded dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+.display {
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.bar {
+  height: 6px;
+  background: var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.memo {
+  white-space: pre-wrap;
+  font-size: 13.5px;
+}
+
+.decision {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 14px 0 10px;
+}
+.decision button {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--mute);
+  font: inherit;
+  font-weight: 600;
+}
+.decision button[data-recommended="true"] {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.decision button:disabled {
+  cursor: not-allowed;
+}
+.conditions {
+  width: 100%;
+  min-height: 68px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  color: var(--mute);
+  background: #fff;
+  resize: vertical;
+}
+.signing {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--violet);
+  background: var(--shell);
+  color: var(--mute);
+  font-size: 12.5px;
+}
+.command {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--ink);
+  color: #e2e8f0;
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+.empty {
+  color: var(--faint);
+  font-style: italic;
+}
+.error {
+  color: var(--danger);
+}

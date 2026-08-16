@@ -1,5 +1,5 @@
-.PHONY: help bootstrap emulators emulators-stop seed run-local dev-ui open-review deploy demo \
-        demo-fixtures binder dashboard teardown test lint probe
+.PHONY: help bootstrap emulators emulators-stop seed reset run-local dev-ui open-review deploy \
+        demo demo-fixtures binder dashboard teardown test lint probe
 
 PYTHON ?= python
 
@@ -22,6 +22,9 @@ emulators-stop: ## stop the emulators
 
 seed: emulators ## load synthetic vendors into Firestore and object storage
 	$(PYTHON) -m scenarios.seed
+
+reset: emulators ## clear every review's working state, then reseed (local emulator only)
+	$(PYTHON) -m scenarios.seed --reset
 
 run-local: emulators ## run the worker: pull events, dispatch to agents, acknowledge
 	$(PYTHON) -m scripts.run_local
@@ -50,6 +53,14 @@ demo-fixtures:  ## run the same scenario with fixture answers: free, determinist
 
 binder:         ## render a review's audit binder to HTML (REVIEW=<id>)
 	$(PYTHON) -m services.binder.render --review-id $(REVIEW)
+
+# The emulator partitions on project id, so the dashboard has to read under the same one the
+# fleet writes under. .env is the single place that is configured, so the target reads it rather
+# than restating a default that would drift.
+dashboard: emulators ## read-only operator view at localhost:3000
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		export FIRESTORE_EMULATOR_HOST=$${FIRESTORE_EMULATOR_HOST:-localhost:8080}; \
+		cd services/dashboard && npm install --silent --no-audit --no-fund && npm run dev
 
 teardown:       ## delete everything except the dashboard service
 	./infra/teardown.sh
