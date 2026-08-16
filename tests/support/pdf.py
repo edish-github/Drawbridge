@@ -80,6 +80,133 @@ def multi_line_pdf(lines: list[str], concealed: list[str] | None = None) -> byte
     return _assemble("\n".join(body).encode("latin-1"))
 
 
+def tiny_font_pdf(lines: list[str], footer: str) -> bytes:
+    """Return a PDF whose footer is set at 2pt: legible to a parser, not to a reader.
+
+    Corpus variant 2. The concealment is size rather than colour, and the point of building it
+    separately is that a detector keyed on the white-fill operator would catch variant 1 and
+    miss this one for a reason nobody would notice.
+    """
+    body = []
+    y = 760
+    for line in lines:
+        body.append(f"BT /F1 9 Tf {BLACK_FILL} 54 {y} Td ({_escape(line[:110])}) Tj ET")
+        y -= 12
+    for part in _wrap(footer, 300):
+        body.append(f"BT /F1 2 Tf {BLACK_FILL} 54 40 Td ({_escape(part)}) Tj ET")
+    return _assemble("\n".join(body).encode("latin-1"))
+
+
+def two_page_pdf(page_one: list[str], page_two: list[str]) -> bytes:
+    """Return a two-page PDF. Corpus variant 7 splits its payload across the boundary.
+
+    Each half reads as ordinary prose on its own page; the instruction only exists once the two
+    are concatenated, which is what extraction does and what a per-page detector would not.
+    """
+    streams = []
+    for lines in (page_one, page_two):
+        body = []
+        y = 760
+        for line in lines:
+            body.append(f"BT /F1 9 Tf {BLACK_FILL} 54 {y} Td ({_escape(line[:110])}) Tj ET")
+            y -= 12
+        streams.append("\n".join(body).encode("latin-1"))
+
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 7 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length " + str(len(streams[0])).encode() + b" >>\nstream\n" + streams[0]
+        + b"\nendstream",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>",
+        b"<< /Length " + str(len(streams[1])).encode() + b" >>\nstream\n" + streams[1]
+        + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    return _write(objects, root=1)
+
+
+def pdf_with_metadata(lines: list[str], *, title: str, keywords: str) -> bytes:
+    """Return a PDF carrying an instruction in its document information dictionary.
+
+    Corpus variant 8, and the one that asks the sharpest question of the pipeline: the payload
+    is not in the content stream at all. Whether it is ever screened depends entirely on whether
+    text extraction reads metadata, and the honest answer for this project is that it does not.
+    """
+    body = []
+    y = 760
+    for line in lines:
+        body.append(f"BT /F1 9 Tf {BLACK_FILL} 54 {y} Td ({_escape(line[:110])}) Tj ET")
+        y -= 12
+    stream = "\n".join(body).encode("latin-1")
+
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Title (" + _escape(title).encode("latin-1") + b") /Keywords ("
+        + _escape(keywords).encode("latin-1") + b") /Producer (drawbridge-corpus) >>",
+    ]
+    return _write(objects, root=1, info=6)
+
+
+def image_only_pdf(caption_alt: str) -> bytes:
+    """Return a page carrying an image XObject and no text at all.
+
+    Corpus variant 9. The instruction is rendered into pixels, so extraction has nothing to
+    extract — which is the point. This is not a detector failure, it is a bounded blind spot,
+    and ``extraction`` flags a page like this for human review rather than passing it as clean.
+
+    ``caption_alt`` goes in the XObject's ``/Alt`` entry, which is where the instruction would
+    live for a real attacker relying on an accessibility reader rather than on OCR.
+    """
+    pixels = b"\xff\x00\x00\x00\xff\x00\x00\x00\xff\xff\xff\xff"
+    image = (
+        b"<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceRGB "
+        b"/BitsPerComponent 8 /Alt (" + _escape(caption_alt).encode("latin-1") + b") "
+        b"/Length " + str(len(pixels)).encode() + b" >>\nstream\n" + pixels + b"\nendstream"
+    )
+    stream = b"q 400 0 0 200 106 500 cm /Im0 Do Q"
+
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+        b"/Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        image,
+    ]
+    return _write(objects, root=1)
+
+
+def _write(objects: list[bytes], *, root: int, info: int | None = None) -> bytes:
+    """Assemble numbered objects into a valid PDF with an xref table."""
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += f"{number} 0 obj\n".encode() + body + b"\nendobj\n"
+
+    xref_at = len(out)
+    out += f"xref\n0 {len(objects) + 1}\n".encode()
+    out += b"0000000000 65535 f \n"
+    for offset in offsets:
+        out += f"{offset:010d} 00000 n \n".encode()
+
+    trailer = f"<< /Size {len(objects) + 1} /Root {root} 0 R"
+    if info is not None:
+        trailer += f" /Info {info} 0 R"
+    trailer += " >>"
+    out += f"trailer\n{trailer}\nstartxref\n{xref_at}\n".encode()
+    out += b"%%EOF\n"
+    return bytes(out)
+
+
 def _wrap(text: str, width: int) -> list[str]:
     out, current = [], ""
     for word in text.split():

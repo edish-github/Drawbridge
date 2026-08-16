@@ -76,6 +76,9 @@ demo-crash:     ## kill the worker mid-send, restart it, and finish the review
 demo-second:    ## review the same vendor twice and show what the second one already knew
 	$(UNSCREENED) $(PYTHON) -m scenarios.second_review --vendor $(or $(VENDOR),datadynamo)
 
+corpus:         ## run the injection corpus and write the measured detection table
+	$(UNSCREENED) $(PYTHON) -m scripts.corpus_run
+
 binder:         ## render a review's audit binder to HTML (REVIEW=<id>)
 	$(PYTHON) -m services.binder.render --review-id $(REVIEW)
 

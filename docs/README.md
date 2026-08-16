@@ -37,7 +37,7 @@ the part that is genuinely judgement.
 
 | Claim | Proven by |
 |---|---|
-| A vendor cannot steer the review by writing instructions into their evidence | `tests/test_armor_flow.py`, and the screening boundary in [Security](security.md) |
+| A vendor cannot steer the review by writing instructions into their evidence | `make corpus` — twelve variants, every outcome measured — and the screening boundary in [Security](security.md) |
 | The score cannot be gamed by the thing being scored | An import graph: `agents/risk_scorer/scoring.py` cannot reach `shared.routing` |
 | A killed worker never sends a second email and never loses work | `make demo-crash`, three real processes and a real SIGKILL |
 | A review that ran before makes the next one shorter without making it laxer | `make demo-second`, 43 questions instead of 54, tier never falls |
@@ -46,8 +46,9 @@ the part that is genuinely judgement.
 
 Stated here rather than left for a reader to discover:
 
-- **The Model Armor detection rate.** Needs the real service, which needs a project. The eleven
-  assertions exist, skipped, in `tests/test_armor_flow.py`.
+- **The Model Armor detection rate.** All twelve corpus variants are built and the harness runs,
+  but against the local stub, which is a regex over the corpus's own technique classes. `make
+  corpus` prints the floor and labels it as a stub result; the real number needs the service.
 - **Severity stability.** The Trust Score is arithmetic over model-assigned severities, and the
   evidence for their stability is three runs of one claim. `scripts/severity_sweep.py` measures
   it; it needs quota.
