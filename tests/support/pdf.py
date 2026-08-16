@@ -26,8 +26,11 @@ def one_page_pdf(visible: str, concealed: str = "") -> bytes:
     lines = [f"BT /F1 12 Tf {BLACK_FILL} 72 720 Td ({_escape(visible)}) Tj ET"]
     if concealed:
         lines.append(f"BT /F1 12 Tf {WHITE_FILL} 72 690 Td ({_escape(concealed)}) Tj ET")
-    stream = "\n".join(lines).encode("latin-1")
+    return _assemble("\n".join(lines).encode("latin-1"))
 
+
+def _assemble(stream: bytes) -> bytes:
+    """Wrap a content stream in the smallest valid single-page PDF."""
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
@@ -55,5 +58,54 @@ def one_page_pdf(visible: str, concealed: str = "") -> bytes:
     return bytes(out)
 
 
+def multi_line_pdf(lines: list[str], concealed: list[str] | None = None) -> bytes:
+    """Return a PDF whose visible text is ``lines`` and whose concealed text is white on white.
+
+    Used to build the shipped vendor fixtures from their Markdown sources, so the document the
+    pipeline receives is the format a real upload arrives in.
+    """
+    body: list[str] = []
+    y = 760
+    for line in lines:
+        if y < 60:
+            break
+        body.append(f"BT /F1 9 Tf {BLACK_FILL} 54 {y} Td ({_escape(line[:110])}) Tj ET")
+        y -= 12
+
+    for line in concealed or []:
+        for part in _wrap(line, 110):
+            body.append(f"BT /F1 9 Tf {WHITE_FILL} 54 {y} Td ({_escape(part)}) Tj ET")
+            y -= 12
+
+    return _assemble("\n".join(body).encode("latin-1"))
+
+
+def _wrap(text: str, width: int) -> list[str]:
+    out, current = [], ""
+    for word in text.split():
+        if len(current) + len(word) + 1 > width:
+            out.append(current)
+            current = word
+        else:
+            current = f"{current} {word}".strip()
+    if current:
+        out.append(current)
+    return out
+
+
+_TYPOGRAPHY = {
+    "—": "-", "–": "-", "‘": "'", "’": "'",
+    "“": '"', "”": '"', "…": "...", " ": " ",
+}
+"""Punctuation the base Helvetica encoding cannot carry, mapped to what it can.
+
+Only shapes change, never words — the payload has to survive this substitution intact, or the
+fixture would be testing a document nobody planted.
+"""
+
+
 def _escape(text: str) -> str:
+    for fancy, plain in _TYPOGRAPHY.items():
+        text = text.replace(fancy, plain)
+    text = text.encode("latin-1", errors="replace").decode("latin-1")
     return text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
