@@ -177,12 +177,45 @@ def extract_chain(
     return findings
 
 
+CHAIN_QUERY = (
+    "subprocessors, sub-processors, third parties and vendors we share data with, "
+    "the companies that process customer data on our behalf, hosting provider, "
+    "data processing agreement, jurisdiction and data location"
+)
+"""The query that finds a subprocessor table wherever it is in a document.
+
+A subprocessor list is sometimes its own file and sometimes an appendix to a DPA, and an
+appendix is exactly the part a prefix does not reach. Retrieved rather than truncated for the
+same reason document facts are.
+"""
+
+CHAIN_TOP_K = 8
+"""Passages per document. Higher than the per-fact budget, because a subprocessor table is one
+long region rather than a sentence, and half a table extracts as a chain with companies missing
+— which reads downstream as a vendor with fewer subprocessors rather than as a partial read."""
+
+
 def extract(ctx, review_id: str, refs: list[str]) -> _ExtractedChain:
     """Read the subprocessor table out of the vendor's documents. The only model call here."""
+    from agents.evidence.retrieval import retrieve_for_claim
+
     passages = []
     for ref in refs:
-        body, name = read_clean_document(ref)
-        passages.append(f"[{name}]\n{body[:MAX_DOCUMENT_CHARS]}")
+        _, name = read_clean_document(ref)
+        chunks = retrieve_for_claim(CHAIN_QUERY, review_id, ctx, k=CHAIN_TOP_K, doc_ref=ref)
+        if chunks:
+            body = "\n\n".join(chunk.text for chunk in sorted(chunks, key=lambda c: c.chunk_id))
+        else:
+            # Never indexed. A bounded prefix beats reading nothing, and it says which it did.
+            body, _ = read_clean_document(ref)
+            body = body[:MAX_DOCUMENT_CHARS]
+            log.warning(
+                "degraded mode: %s has no retrievable chunks, reading its first %d characters "
+                "for the subprocessor chain",
+                ref,
+                MAX_DOCUMENT_CHARS,
+            )
+        passages.append(f"[{name}]\n{body}")
 
     result = generate(
         "extract_controls",

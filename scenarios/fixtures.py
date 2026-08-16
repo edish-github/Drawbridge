@@ -214,13 +214,11 @@ class FixtureResponder:
 
     def _extract(self, prompt: str, schema):
         """Read dates, auditor, opinion and scope straight out of the document in the prompt."""
-        from agents.evidence.extractors import _ExtractedControls, _ExtractedFacts
+        from agents.evidence.extractors import _ExtractedFacts
         from agents.evidence.subprocessors import _ExtractedChain
 
         if schema is _ExtractedChain:
             return _ExtractedChain(subprocessors=self._subprocessors(prompt))
-        if schema is _ExtractedControls:
-            return _ExtractedControls(controls=[])
         return _ExtractedFacts(**self._facts(prompt))
 
     def _cross_examine(self, prompt: str, schema):

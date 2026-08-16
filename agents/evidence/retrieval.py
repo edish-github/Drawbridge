@@ -47,11 +47,20 @@ from shared.domain import EvidenceChunk
 log = logging.getLogger("drawbridge.retrieval")
 
 
-def knn_search(review_id: str, query_embedding: list[float], k: int) -> list[EvidenceChunk]:
+def knn_search(
+    review_id: str, query_embedding: list[float], k: int, *, doc_ref: str | None = None
+) -> list[EvidenceChunk]:
     """Return the ``k`` nearest chunks within this review's evidence.
 
     The ``review_id`` filter is applied by the index, not by post-filtering the results —
     post-filtering would let another review's passages consume the k slots.
+
+    Args:
+        doc_ref: narrow the search to one document. Cross-examination wants the whole review,
+            because a claim is reconciled against everything the vendor sent. Extraction wants
+            one document, because "who is the auditor" asked across a review would answer from
+            whichever document names an auditor most confidently, and attributing the SOC 2's
+            auditor to the ISO certificate is a wrong fact rather than a missing one.
 
     Raises:
         Nothing. An unavailable index logs a degraded-mode warning and returns an empty list.
@@ -61,35 +70,41 @@ def knn_search(review_id: str, query_embedding: list[float], k: int) -> list[Evi
 
     try:
         if settings().is_cloud:
-            return _knn_indexed(review_id, query_embedding, k)
-        return _knn_bruteforce(review_id, query_embedding, k)
+            return _knn_indexed(review_id, query_embedding, k, doc_ref=doc_ref)
+        return _knn_bruteforce(review_id, query_embedding, k, doc_ref=doc_ref)
     except Exception as exc:  # noqa: BLE001 — retrieval is optional and never blocks
         log.warning("degraded mode: retrieval unavailable for review=%s: %s", review_id, exc)
         return []
 
 
-def _knn_indexed(review_id: str, query_embedding: list[float], k: int) -> list[EvidenceChunk]:
-    """Query the Firestore KNN index, pre-filtered to this review."""
+def _knn_indexed(
+    review_id: str, query_embedding: list[float], k: int, *, doc_ref: str | None = None
+) -> list[EvidenceChunk]:
+    """Query the Firestore KNN index, pre-filtered to this review and optionally one document."""
     from google.cloud.firestore_v1 import FieldFilter
     from google.cloud.firestore_v1.base_vector_query import DistanceMeasure
     from google.cloud.firestore_v1.vector import Vector
 
-    snapshots = (
+    query = (
         firestore_client()
         .collection(CHUNK_COLLECTION)
         .where(filter=FieldFilter("review_id", "==", review_id))
-        .find_nearest(
-            vector_field="embedding",
-            query_vector=Vector(query_embedding),
-            limit=k,
-            distance_measure=DistanceMeasure.COSINE,
-        )
-        .get()
     )
+    if doc_ref:
+        query = query.where(filter=FieldFilter("doc_ref", "==", doc_ref))
+
+    snapshots = query.find_nearest(
+        vector_field="embedding",
+        query_vector=Vector(query_embedding),
+        limit=k,
+        distance_measure=DistanceMeasure.COSINE,
+    ).get()
     return [EvidenceChunk.model_validate(s.to_dict()) for s in snapshots]
 
 
-def _knn_bruteforce(review_id: str, query_embedding: list[float], k: int) -> list[EvidenceChunk]:
+def _knn_bruteforce(
+    review_id: str, query_embedding: list[float], k: int, *, doc_ref: str | None = None
+) -> list[EvidenceChunk]:
     """Rank this review's chunks by cosine similarity in Python.
 
     The review filter is a query, so the candidate set is already scoped before anything is
@@ -98,15 +113,16 @@ def _knn_bruteforce(review_id: str, query_embedding: list[float], k: int) -> lis
     """
     from google.cloud.firestore_v1 import FieldFilter
 
-    docs = (
+    query = (
         firestore_client()
         .collection(CHUNK_COLLECTION)
         .where(filter=FieldFilter("review_id", "==", review_id))
-        .stream()
     )
+    if doc_ref:
+        query = query.where(filter=FieldFilter("doc_ref", "==", doc_ref))
 
     scored: list[tuple[float, EvidenceChunk]] = []
-    for doc in docs:
+    for doc in query.stream():
         chunk = EvidenceChunk.model_validate(doc.to_dict())
         if not chunk.embedding:
             continue
@@ -116,11 +132,13 @@ def _knn_bruteforce(review_id: str, query_embedding: list[float], k: int) -> lis
     return [chunk for _, chunk in scored[:k]]
 
 
-def retrieve_for_claim(claim: str, review_id: str, ctx, *, k: int | None = None):
-    """Embed a claim and return the passages relevant to it.
+def retrieve_for_claim(
+    claim: str, review_id: str, ctx, *, k: int | None = None, doc_ref: str | None = None
+):
+    """Embed a query and return the passages relevant to it.
 
-    The one entry point cross-examination uses, so the embedding call and the search stay
-    together and a caller cannot accidentally search with an unembedded query.
+    The one entry point cross-examination and extraction both use, so the embedding call and
+    the search stay together and a caller cannot accidentally search with an unembedded query.
     """
     from shared.routing import embed
 
@@ -133,7 +151,17 @@ def retrieve_for_claim(claim: str, review_id: str, ctx, *, k: int | None = None)
             review_id,
         )
         return []
-    return knn_search(review_id, vector, limit)
+    return knn_search(review_id, vector, limit, doc_ref=doc_ref)
+
+
+def chunks_for_document(review_id: str, doc_ref: str) -> list[EvidenceChunk]:
+    """Return every chunk of one document, in order.
+
+    The fallback when a document was never indexed — a scanned PDF, an embedding outage — so
+    extraction still has something to read rather than silently returning nothing for every
+    fact. Ordered by chunk id, which is the order the document was written in.
+    """
+    return [chunk for chunk in all_chunks(review_id) if chunk.doc_ref == doc_ref]
 
 
 def cosine(a: list[float], b: list[float]) -> float:
