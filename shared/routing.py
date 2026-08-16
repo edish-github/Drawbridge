@@ -22,7 +22,9 @@ the credits and a runaway retry loop at two in the morning.
 
 Failure semantics: a task name with no routing entry raises rather than falling back to a
 default model — an unrouted task is a bug, and a silent fallback would make the cost story
-untrue. Cost is accumulated *after* the call returns, because a call that failed still consumed
+untrue. Transient capacity failures are retried here, below every caller, with a bound and a
+backoff; past the bound the error is raised and the review parks. Cost is accumulated *after*
+the call returns, because a call that failed still consumed
 tokens if it produced usage metadata and consumed none if it did not. Exceeding the ceiling
 raises from inside accumulation, so the effect stops at the call that crossed the line rather
 than at the next check.
@@ -32,6 +34,8 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel
@@ -48,6 +52,7 @@ EMBED = "MODEL_EMBED"
 LOCAL = "MODEL_LOCAL"
 
 ROUTING: dict[str, str] = {
+    "plan_review": FAST,
     "parse_reply": FAST,
     "extract_controls": FAST,
     "chase_message": FAST,
@@ -77,6 +82,26 @@ RATES_USD_PER_MTOK: dict[str, dict[str, float]] = {
 
 COLLECTION_REVIEWS = "reviews"
 
+RETRY_ATTEMPTS = 4
+"""Total attempts per call, including the first. Bounded, never open-ended.
+
+Roughly a third of calls to the deep model returned a transient capacity error during
+development, and the deep model is what cross-examination runs on — inside a single-take demo
+segment. An unretried transient failure there is a review that parks on camera for a reason
+that has nothing to do with the vendor. Past the bound the error is raised and the caller parks
+the review: retrying forever turns a capacity problem into a spend problem.
+"""
+
+RETRY_BASE_DELAY_SECONDS = 2.0
+"""First backoff interval. Doubles per attempt: 2s, 4s, 8s."""
+
+_TRANSIENT_MARKERS = ("503", "UNAVAILABLE", "500", "INTERNAL", "deadline exceeded")
+"""Substrings that identify a retryable failure.
+
+Capacity and transport only. A quota error is deliberately absent: 429 means the answer will
+not change for a while, and retrying it burns the ceiling rather than the backlog.
+"""
+
 
 class UnroutedTask(Exception):
     """A task name with no routing entry. A bug, never a fallback."""
@@ -101,6 +126,46 @@ class ModelResult(BaseModel):
     completion_tokens: int
     cost_usd: float
     parsed: Any = None
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Return whether an exception is a capacity or transport failure worth retrying."""
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return any(marker.lower() in text for marker in _TRANSIENT_MARKERS)
+
+
+def _with_retry(label: str, s, call: Callable[[], Any]) -> Any:
+    """Run ``call``, retrying transient failures with exponential backoff.
+
+    Every caller inherits this because it sits below ``generate`` and ``embed`` rather than
+    beside them. The attempt count is recorded on the span whether or not a retry happened, so
+    a rising retry rate is visible in the trace before it is visible as a stalled review.
+
+    Raises:
+        Exception: the last failure, unchanged, once the bound is reached or when the failure
+            is not transient. The caller parks the review.
+    """
+    for attempt in range(1, RETRY_ATTEMPTS + 1):
+        try:
+            result = call()
+            s.set_attribute("model.attempts", attempt)
+            if attempt > 1:
+                log.info("%s succeeded on attempt %d of %d", label, attempt, RETRY_ATTEMPTS)
+            return result
+        except Exception as exc:
+            if attempt == RETRY_ATTEMPTS or not _is_transient(exc):
+                s.set_attribute("model.attempts", attempt)
+                raise
+            delay = RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1))
+            log.warning(
+                "%s: transient %s on attempt %d of %d, retrying in %.0fs",
+                label,
+                type(exc).__name__,
+                attempt,
+                RETRY_ATTEMPTS,
+                delay,
+            )
+            time.sleep(delay)
 
 
 def model_for(task: str) -> tuple[str, str]:
@@ -163,8 +228,12 @@ def generate(
             config["response_mime_type"] = "application/json"
             config["response_schema"] = response_schema
 
-        response = genai_client().models.generate_content(
-            model=model_id, contents=prompt, config=config
+        response = _with_retry(
+            f"generate_content({task})",
+            s,
+            lambda: genai_client().models.generate_content(
+                model=model_id, contents=prompt, config=config
+            ),
         )
 
         usage = response.usage_metadata
@@ -221,7 +290,11 @@ def embed(text: str, ctx) -> list[float]:
     rate_key, model_id = model_for("embed_evidence")
     try:
         with span("model.embed_evidence", ctx, model=model_id) as s:
-            response = genai_client().models.embed_content(model=model_id, contents=text)
+            response = _with_retry(
+                "embed_content",
+                s,
+                lambda: genai_client().models.embed_content(model=model_id, contents=text),
+            )
             values = list(response.embeddings[0].values)
             s.set_attribute("embedding.dimensions", len(values))
 
