@@ -17,8 +17,9 @@ identities:
     display: Drawbridge orchestrator
     purpose: Owns review state and the plan.
     firestore:
-      read: [reviews, vendors, qa_responses, findings, scores, screenings]
-      write: [reviews, events]
+      read: [reviews, vendors, qa_responses, findings, scores, screenings, dossiers,
+             idempotency, dashboard_events]
+      write: [reviews, idempotency, dashboard_events, events]
     pubsub: [publish, subscribe]
     vertex_ai: true
     storage: []
@@ -31,8 +32,14 @@ identities:
     display: Drawbridge questionnaire
     purpose: Talks to the vendor. Holds nothing that can change the number.
     firestore:
-      read: [reviews, vendors, qa_responses]
-      write: [qa_responses, events]
+      # reviews write covers the contact-gate park and nothing else: the agent that hits the
+      # gate is the agent that records the wait. approvals is read-only — it presents whatever
+      # approval exists and the gateway decides. approval_tokens_spent is where single use is
+      # recorded, which is deliberately not the collection approvals are authored in.
+      read: [reviews, vendors, qa_responses, inbox, approvals, approval_tokens_spent,
+             idempotency, dashboard_events]
+      write: [reviews, qa_responses, inbox, approval_tokens_spent, idempotency,
+              dashboard_events, events]
     pubsub: [publish, subscribe]
     vertex_ai: true
     storage: []
@@ -47,8 +54,9 @@ identities:
     display: Drawbridge evidence
     purpose: Reads the most hostile content in the system and holds nothing to actuate it with.
     firestore:
-      read: [reviews, vendors, qa_responses, evidence_chunks, subprocessors, findings]
-      write: [findings, evidence_chunks, subprocessors, events]
+      read: [reviews, vendors, qa_responses, evidence_chunks, subprocessors, findings,
+             idempotency, dashboard_events]
+      write: [findings, evidence_chunks, subprocessors, idempotency, dashboard_events, events]
     pubsub: [publish, subscribe]
     vertex_ai: true
     storage:
@@ -63,8 +71,9 @@ identities:
     display: Drawbridge scorer
     purpose: Computes the Trust Score in code and writes one memo.
     firestore:
-      read: [reviews, vendors, findings, screenings, scores]
-      write: [scores, findings, events]
+      read: [reviews, vendors, findings, screenings, scores, dossiers, idempotency,
+             dashboard_events]
+      write: [scores, findings, dossiers, idempotency, dashboard_events, events]
     pubsub: [publish, subscribe]
     vertex_ai: true
     storage: []
@@ -76,8 +85,8 @@ identities:
     display: Drawbridge watchdog
     purpose: Post-approval monitoring. Fetches only from the feed allowlist.
     firestore:
-      read: [reviews, vendors, scores, tasks]
-      write: [tasks, events]
+      read: [reviews, vendors, scores, tasks, idempotency, dashboard_events]
+      write: [tasks, idempotency, dashboard_events, events]
     pubsub: [publish]
     vertex_ai: true
     storage: []
@@ -96,8 +105,11 @@ identities:
       most hostile bytes in the system and is the one component structurally incapable of
       prompting anything.
     firestore:
-      read: [reviews, screenings]
-      write: [screenings, events]
+      # No evidence_chunks write. Chunking is an embedding call, embedding is a model call, and
+      # this identity holds no role that can make one — so indexing is the Evidence agent's,
+      # even though the ordering constraint it obeys is enforced in the screening module.
+      read: [reviews, screenings, inert_excerpts]
+      write: [screenings, inert_excerpts, events]
     pubsub: [publish]
     vertex_ai: false
     model_armor: modelarmor.user
@@ -132,7 +144,8 @@ identities:
     display: Drawbridge dashboard
     purpose: Internal review queue, timeline and gate cards.
     firestore:
-      read: [reviews, vendors, findings, scores, screenings, approvals, events, tasks]
+      read: [reviews, vendors, findings, scores, screenings, approvals, events, tasks,
+             inbox, dashboard_events]
       write: [events]
     pubsub: [publish]
     vertex_ai: false
@@ -164,7 +177,7 @@ identities:
     display: Drawbridge binder service
     purpose: Renders the audit binder from a template, never from a model.
     firestore:
-      read: [reviews, vendors, findings, scores, screenings, approvals, events, qa_responses, evidence_chunks, tasks]
+      read: [reviews, vendors, findings, scores, screenings, approvals, events, qa_responses, evidence_chunks, tasks, inert_excerpts, dashboard_events]
       write: []
     pubsub: []
     vertex_ai: false
@@ -191,3 +204,7 @@ denied_action_probes:
     action: write a document to approvals
   - identity: sa-watchdog
     action: send an outbound email through the gateway
+  - identity: sa-questionnaire
+    action: write a document to approvals
+  - identity: sa-orchestrator
+    action: write a document to inbox
