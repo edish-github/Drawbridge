@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections import defaultdict
+from pathlib import Path
 
 import yaml
 
@@ -98,26 +99,41 @@ def _membership(names: list[str], project: str) -> str:
     return f"caller() in [{emails}]"
 
 
+REPO = Path(__file__).resolve().parent.parent.parent
+MATRIX_PATH = REPO / "infra" / "iam" / "permission-matrix.yaml"
+RULES_PATH = REPO / "infra" / "firestore" / "firestore.rules"
+
+
+def rules_for(matrix_path: str | Path = MATRIX_PATH, *, project: str) -> str:
+    """Return the ruleset the matrix implies, without writing it anywhere.
+
+    The seam the drift test uses: it regenerates from the matrix and compares against the file
+    on disk, so a matrix edit that was never regenerated fails in the suite rather than in a
+    project six weeks later.
+    """
+    with open(matrix_path) as fh:
+        matrix = yaml.safe_load(fh)
+    readers, writers = collect(matrix)
+    return render(readers, writers, project)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--matrix", required=True)
+    parser.add_argument("--matrix", default=str(MATRIX_PATH))
     parser.add_argument("--project", required=True)
-    parser.add_argument("--out", required=True)
+    parser.add_argument("--out", default=str(RULES_PATH))
     args = parser.parse_args()
 
-    with open(args.matrix) as fh:
-        matrix = yaml.safe_load(fh)
-
     try:
-        readers, writers = collect(matrix)
+        body = rules_for(args.matrix, project=args.project)
     except EmptyMatrix as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
     with open(args.out, "w") as fh:
-        fh.write(render(readers, writers, args.project))
+        fh.write(body)
 
-    print(f"wrote {args.out}: {len(set(readers) | set(writers))} collections")
+    print(f"wrote {args.out}: {body.count('    match /') - 1} collections")
     return 0
 
 

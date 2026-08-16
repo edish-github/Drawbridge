@@ -64,8 +64,22 @@ if ! gcloud components list --filter="id:pubsub-emulator" \
   gcloud components install pubsub-emulator --quiet
 fi
 
+# Security rules are loaded into the emulator, generated from the permission matrix by
+# `make rules`. The emulator cannot enforce IAM identity — nothing here proves that sa-evidence
+# is genuinely the principal at runtime — but it does evaluate rules, so every collection-level
+# row in the matrix becomes a test rather than a claim. A caller presenting the emulator's admin
+# token is unaffected, which is why the fleet and the rest of the suite run unchanged.
+RULES_FILE="${REPO_ROOT}/infra/firestore/firestore.rules"
+RULES_ARG=""
+if [ -f "${RULES_FILE}" ]; then
+  RULES_ARG="--rules=${RULES_FILE}"
+  log "loading security rules from ${RULES_FILE#"${REPO_ROOT}"/}"
+else
+  log "WARNING: ${RULES_FILE#"${REPO_ROOT}"/} is missing; run 'make rules'"
+fi
+
 start firestore "${FIRESTORE_HOST}" \
-  "gcloud emulators firestore start --host-port=${FIRESTORE_HOST} --project=${PROJECT}"
+  "gcloud emulators firestore start --host-port=${FIRESTORE_HOST} --project=${PROJECT} ${RULES_ARG}"
 
 # The Pub/Sub emulator lives under `gcloud beta`, unlike the Firestore one. Verified against
 # gcloud 580.0.0: `gcloud emulators pubsub` is not a valid command group.

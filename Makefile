@@ -1,5 +1,5 @@
-.PHONY: help bootstrap emulators emulators-stop seed reset run-local dev-ui open-review deploy \
-        demo demo-fixtures binder dashboard teardown test lint probe
+.PHONY: help bootstrap rules emulators emulators-stop seed reset run-local dev-ui open-review \
+        deploy demo demo-fixtures demo-crash binder dashboard teardown test lint probe
 
 PYTHON ?= python
 
@@ -10,7 +10,15 @@ help:           ## list available targets
 bootstrap:      ## enable APIs, create topics, buckets, firestore, IAM, armor templates
 	./infra/bootstrap.sh
 
-emulators:      ## start the Firestore and Pub/Sub emulators for local mode
+# The rules are generated from the permission matrix rather than hand-written, so the table in
+# the README and the ruleset the emulator enforces cannot drift apart. Regenerating before the
+# emulator starts is what makes a matrix edit take effect in the suite on the next run.
+rules:          ## regenerate infra/firestore/firestore.rules from the permission matrix
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		$(PYTHON) -m infra.firestore.generate_rules \
+			--project $${PROJECT_ID:-drawbridge-local}
+
+emulators: rules ## start the Firestore and Pub/Sub emulators for local mode
 	./scripts/emulators.sh
 
 emulators-stop: ## stop the emulators

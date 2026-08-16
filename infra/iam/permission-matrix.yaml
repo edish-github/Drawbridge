@@ -12,14 +12,29 @@
 
 version: 1
 
+# Two collections are deliberately readable and writable by nobody in one direction:
+#
+#   approved_vendors  has readers and no writer. The register of vendors the organisation has
+#                     already accepted is maintained out of band; an agent that could add a
+#                     name to it could make an unknown fourth party known to the org by
+#                     writing one document, which is the finding rather than the fix.
+#
+#   decisions         has five writers and two readers and no deleter, because it is what the
+#                     binder's reasoning appendix is rendered from. A trace nobody can amend
+#                     after the fact is the only kind worth printing.
+#
+# tests/test_iam_boundaries.py asserts every row below against the emulator with the generated
+# rules loaded, and fails if the code names a collection this file does not.
+
 identities:
   - name: sa-orchestrator
     display: Drawbridge orchestrator
     purpose: Owns review state and the plan.
     firestore:
-      read: [reviews, vendors, qa_responses, findings, scores, screenings, dossiers,
-             idempotency, dashboard_events]
-      write: [reviews, idempotency, dashboard_events, events]
+      read: [reviews, vendors, qa_responses, findings, scores, memos, screenings, dossiers,
+             idempotency, dashboard_events, data_scope_classifications]
+      write: [reviews, idempotency, dashboard_events, events, decisions,
+              data_scope_classifications]
     pubsub: [publish, subscribe]
     vertex_ai: true
     storage: []
@@ -36,10 +51,10 @@ identities:
       # gate is the agent that records the wait. approvals is read-only — it presents whatever
       # approval exists and the gateway decides. approval_tokens_spent is where single use is
       # recorded, which is deliberately not the collection approvals are authored in.
-      read: [reviews, vendors, qa_responses, inbox, approvals, approval_tokens_spent,
-             idempotency, dashboard_events]
-      write: [reviews, qa_responses, inbox, approval_tokens_spent, idempotency,
-              dashboard_events, events]
+      read: [reviews, vendors, qa_responses, qa_responses_superseded, inbox, approvals,
+             approval_tokens_spent, idempotency, dashboard_events]
+      write: [reviews, qa_responses, qa_responses_superseded, inbox, approval_tokens_spent,
+              idempotency, dashboard_events, events, decisions]
     pubsub: [publish, subscribe]
     vertex_ai: true
     storage: []
@@ -55,8 +70,9 @@ identities:
     purpose: Reads the most hostile content in the system and holds nothing to actuate it with.
     firestore:
       read: [reviews, vendors, qa_responses, evidence_chunks, subprocessors, findings,
-             idempotency, dashboard_events]
-      write: [findings, evidence_chunks, subprocessors, idempotency, dashboard_events, events]
+             approved_vendors, idempotency, dashboard_events]
+      write: [findings, evidence_chunks, subprocessors, idempotency, dashboard_events, events,
+              decisions]
     pubsub: [publish, subscribe]
     vertex_ai: true
     storage:
@@ -71,9 +87,10 @@ identities:
     display: Drawbridge scorer
     purpose: Computes the Trust Score in code and writes one memo.
     firestore:
-      read: [reviews, vendors, findings, screenings, scores, dossiers, idempotency,
+      read: [reviews, vendors, findings, screenings, scores, memos, dossiers, idempotency,
              dashboard_events]
-      write: [scores, findings, dossiers, idempotency, dashboard_events, events]
+      write: [scores, memos, findings, dossiers, idempotency, dashboard_events, events,
+              decisions]
     pubsub: [publish, subscribe]
     vertex_ai: true
     storage: []
@@ -85,8 +102,8 @@ identities:
     display: Drawbridge watchdog
     purpose: Post-approval monitoring. Fetches only from the feed allowlist.
     firestore:
-      read: [reviews, vendors, scores, tasks, idempotency, dashboard_events]
-      write: [tasks, idempotency, dashboard_events, events]
+      read: [reviews, vendors, scores, tasks, approved_vendors, idempotency, dashboard_events]
+      write: [tasks, idempotency, dashboard_events, events, decisions]
     pubsub: [publish]
     vertex_ai: true
     storage: []
@@ -144,8 +161,8 @@ identities:
     display: Drawbridge dashboard
     purpose: Internal review queue, timeline and gate cards.
     firestore:
-      read: [reviews, vendors, findings, scores, screenings, approvals, events, tasks,
-             inbox, dashboard_events]
+      read: [reviews, vendors, findings, scores, memos, screenings, approvals, events, tasks,
+             inbox, decisions, dashboard_events]
       write: [events]
     pubsub: [publish]
     vertex_ai: false
@@ -177,7 +194,9 @@ identities:
     display: Drawbridge binder service
     purpose: Renders the audit binder from a template, never from a model.
     firestore:
-      read: [reviews, vendors, findings, scores, screenings, approvals, events, qa_responses, evidence_chunks, tasks, inert_excerpts, dashboard_events]
+      read: [reviews, vendors, findings, scores, memos, screenings, approvals, events,
+             qa_responses, qa_responses_superseded, evidence_chunks, subprocessors, tasks,
+             inert_excerpts, decisions, data_scope_classifications, dashboard_events]
       write: []
     pubsub: []
     vertex_ai: false
