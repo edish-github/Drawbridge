@@ -68,6 +68,7 @@ CONTROLLED_VOCABULARY: dict[str, frozenset[str]] = {
     "band": frozenset({"approve", "conditional", "escalate"}),
     "conduct_flag": frozenset({"adversarial_conduct"}),
     "question_effectiveness": frozenset({"usable", "low_confidence", "non_answer"}),
+    "approval_condition": frozenset({"attached", "met", "unmet"}),
 }
 """Note types whose values come from a fixed vocabulary, and the terms each accepts.
 

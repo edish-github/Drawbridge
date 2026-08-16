@@ -302,6 +302,9 @@ tr:last-child td {
 .entry[data-kind="watchdog_triage"]::before {
   background: var(--warn);
 }
+.entry[data-kind="prior_review_recalled"]::before {
+  background: var(--violet);
+}
 .entry summary {
   cursor: pointer;
   list-style: none;

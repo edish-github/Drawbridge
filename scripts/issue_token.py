@@ -57,8 +57,21 @@ class GateNotOpen(Exception):
     """The review is not parked at the gate this approval would release."""
 
 
-def issue(review_id: str, *, scope: str, identity: str, ttl_minutes: int) -> str:
-    """Record one approval and return the token that presents it."""
+def issue(
+    review_id: str,
+    *,
+    scope: str,
+    identity: str,
+    ttl_minutes: int,
+    conditions: list[str] | None = None,
+) -> str:
+    """Record one approval and return the token that presents it.
+
+    ``conditions`` are what the approver required of the vendor before or after signing. They
+    are stored on the approval record — the ledger — and never in durable memory, because they
+    are sentences a person wrote and memory holds terms. A later review recalls that conditions
+    were attached and reads them back from here.
+    """
     review = load_review(review_id)
     if review is None:
         raise GateNotOpen(f"no review {review_id!r}")
@@ -82,6 +95,7 @@ def issue(review_id: str, *, scope: str, identity: str, ttl_minutes: int) -> str
         identity=identity,
         issued_at=now,
         expires_at=now + timedelta(minutes=ttl_minutes),
+        conditions=list(conditions or []),
     )
     db.collection(COLLECTION_APPROVALS).document(approval.jti).set(
         approval.model_dump(mode="json")

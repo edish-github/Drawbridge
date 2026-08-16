@@ -124,6 +124,13 @@ class Plan(BaseModel):
     inherited_keys: dict[str, str] = Field(default_factory=dict)
     domains: list[str] = Field(default_factory=list)
     reason: str = ""
+    carried_questions: list[str] = Field(default_factory=list)
+    """Questions a prior review answered well enough not to ask again.
+
+    On the plan rather than recomputed at send time, because it is part of what this plan *is*:
+    an auditor asking why the vendor was sent nineteen questions rather than thirty is asking
+    about the plan, and the answer has to be in it.
+    """
 
 
 def generate_plan(vendor: Vendor, dossier: Dossier, ctx, *, plan_version: int = 1) -> Plan:
@@ -137,8 +144,20 @@ def generate_plan(vendor: Vendor, dossier: Dossier, ctx, *, plan_version: int = 
         NeedsHuman: when the model returned ``needs_human``, carrying its stated reason. The
             review parks rather than executing a plan the fleet cannot name.
     """
+    from agents.orchestrator.recall import recall
+    from agents.questionnaire.generator import load_bank
+
     facts = facts_from_vendor(vendor)
+    prior = recall(vendor.vendor_id, dossier)
+
+    # Scrutiny never falls across reviews, exactly as it never falls within one. Tier 1 is the
+    # heaviest, so "never lower" is a minimum on the number: a vendor whose second intake form
+    # is more modest than their first does not earn a lighter review by filling it in
+    # differently, and the same rule that stops a vendor's answers reducing their own scrutiny
+    # mid-review stops their next intake form doing it a year later.
     floor = tier_from(facts)
+    if prior.prior_tier:
+        floor = min(floor, prior.prior_tier)
 
     prompt = PLANNING_PROMPT.format(
         floor=floor,
@@ -165,6 +184,7 @@ def generate_plan(vendor: Vendor, dossier: Dossier, ctx, *, plan_version: int = 
     plan = plan_from_output(
         output, plan_version=plan_version, floor=floor, is_ai_vendor=vendor.is_ai_vendor
     )
+    plan.carried_questions = sorted(prior.carried_questions(load_bank()))
     log.info(
         "planned review=%s tier=%d (floor %d, model said %d) steps=%s",
         getattr(ctx, "review_id", "?"),

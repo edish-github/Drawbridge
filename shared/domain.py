@@ -74,6 +74,7 @@ ALLOWED_NOTE_TYPES = frozenset(
         "cert_expiry",
         "subprocessor",
         "question_effectiveness",
+        "approval_condition",
     }
 )
 """The only note types durable memory accepts. Memory is written from material derived from

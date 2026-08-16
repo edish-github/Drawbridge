@@ -254,8 +254,12 @@ def confirm_first_contact(demo: Demo) -> None:
     demo.require("questionnaire_sent", inbox_count(demo.review_id, "questionnaire") == 1)
 
 
-def to_a_decision(demo: Demo) -> list[str]:
-    """Replies, evidence, the score, the decision gate and the binder."""
+def to_a_decision(demo: Demo, *, conditions: list[str] | None = None) -> list[str]:
+    """Replies, evidence, the score, the decision gate and the binder.
+
+    ``conditions`` are what the approver attaches to a conditional approval. They go on the
+    approval record and are read back by a later review of the same vendor.
+    """
     vendor = demo.vendor
 
     # --- replies --------------------------------------------------------------------------
@@ -318,7 +322,7 @@ def to_a_decision(demo: Demo) -> list[str]:
         review.state is ReviewState.GATED and review.gate_scope == "decision",
     )
 
-    approve(demo.review_id, scope="decision")
+    approve(demo.review_id, scope="decision", conditions=conditions)
     demo.drain()
     demo.require("decided", demo.review().state is ReviewState.DECIDED)
 
@@ -430,11 +434,17 @@ def mark_replies_complete(review_id: str) -> None:
     )
 
 
-def approve(review_id: str, *, scope: str) -> None:
+def approve(review_id: str, *, scope: str, conditions: list[str] | None = None) -> None:
     """Release a gate the way a human would, through the approvals path."""
     from scripts.issue_token import issue
 
-    issue(review_id, scope=scope, identity="demo-operator", ttl_minutes=30)
+    issue(
+        review_id,
+        scope=scope,
+        identity="demo-operator",
+        ttl_minutes=30,
+        conditions=conditions,
+    )
 
 
 def inbox_count(review_id: str, kind: str | None = None) -> int:

@@ -46,6 +46,7 @@ from datetime import UTC, datetime
 
 from google.adk import Agent
 
+from agents.orchestrator.closeout import remember_review
 from shared.checkpoint import step
 from shared.clients import firestore_client
 from shared.config import settings
@@ -58,6 +59,7 @@ from shared.events import (
     TOPIC_REVIEW_SCORE_READY,
     TOPIC_VENDOR_REPLY_RECEIVED,
     EventEnvelope,
+    load_review,
     publish,
 )
 from shared.memory import recall_dossier
@@ -165,6 +167,7 @@ def on_intake(event: EventEnvelope, review: Review) -> None:
 
         vendor = load_vendor_record(raw)
         dossier = recall_dossier(vendor.vendor_id)
+        prior = note_prior_review(review, dossier, ctx, s)
 
         try:
             recorded = step(
@@ -190,7 +193,15 @@ def on_intake(event: EventEnvelope, review: Review) -> None:
         record_decision(
             s,
             goal=f"tier and plan the review of {vendor.name}",
-            decision=f"Tier {plan.tier}: {plan.reason}",
+            decision=(
+                f"Tier {plan.tier}: {plan.reason}"
+                + (
+                    f" · {len(plan.carried_questions)} question(s) carried from "
+                    f"{prior.prior_review_id}"
+                    if plan.carried_questions
+                    else ""
+                )
+            ),
             ctx=ctx,
         )
 
@@ -380,6 +391,42 @@ def on_score_ready(event: EventEnvelope, review: Review) -> None:
         )
 
 
+def note_prior_review(review: Review, dossier, ctx, span_handle):
+    """Resolve what is already known about this vendor and put it on the timeline.
+
+    A review that opens holding the last one's outcome is the payoff for durable memory being a
+    layer rather than a cache, and a payoff nobody can see is a payoff nobody believes. The card
+    names what was recalled; the plan that follows names what it changed.
+
+    Returns the ``Recalled`` summary, empty for a vendor nobody has reviewed before.
+    """
+    from agents.orchestrator.recall import recall
+    from shared.state import raise_card
+
+    prior = recall(review.vendor_id, dossier)
+    if not prior.is_repeat:
+        return prior
+
+    raise_card(
+        review.review_id,
+        kind="prior_review_recalled",
+        line=prior.summary(),
+        prior_review_id=prior.prior_review_id,
+        prior_tier=prior.prior_tier,
+        prior_outcome=prior.prior_outcome,
+        conditions=prior.conditions,
+        adversarial=prior.adversarial,
+    )
+    record_decision(
+        span_handle,
+        goal=f"recall what is already known about {review.vendor_id}",
+        decision=prior.summary(),
+        ctx=ctx,
+    )
+    log.info("review=%s opens with a dossier: %s", review.review_id, prior.summary())
+    return prior
+
+
 def on_approved(event: EventEnvelope, review: Review) -> None:
     """Release a gate a human has approved, and resume the path it was blocking.
 
@@ -430,6 +477,10 @@ def on_approved(event: EventEnvelope, review: Review) -> None:
                 gate_released_by=identity,
                 decided_at=datetime.now(UTC).isoformat(),
             )
+            # What this review leaves for the next one. After the transition rather than
+            # before: a decision a person made must not be blocked by a write to a store whose
+            # only job is to inform a review that has not started yet.
+            remember_review(load_review(review.review_id) or review, identity=str(identity))
 
         record_decision(
             s,

@@ -1,5 +1,5 @@
 .PHONY: help bootstrap rules emulators emulators-stop seed reset run-local dev-ui open-review \
-        deploy demo demo-fixtures demo-crash binder dashboard teardown test lint probe
+        deploy demo demo-fixtures demo-crash demo-second binder dashboard teardown test lint probe
 
 PYTHON ?= python
 
@@ -64,6 +64,12 @@ demo-fixtures:  ## run the same scenario with fixture answers: free, determinist
 # review. The vendor is emailed once across both.
 demo-crash:     ## kill the worker mid-send, restart it, and finish the review
 	$(UNSCREENED) $(PYTHON) -m scenarios.crash_demo --vendor $(or $(VENDOR),datadynamo)
+
+# Layer three of the memory hierarchy, made visible. Runs one review to a decision, then opens
+# a second review of the same vendor and shows what it already knew and what changed because of
+# it. Without this beat, durable memory is a store nothing visibly reads.
+demo-second:    ## review the same vendor twice and show what the second one already knew
+	$(UNSCREENED) $(PYTHON) -m scenarios.second_review --vendor $(or $(VENDOR),datadynamo)
 
 binder:         ## render a review's audit binder to HTML (REVIEW=<id>)
 	$(PYTHON) -m services.binder.render --review-id $(REVIEW)

@@ -181,6 +181,28 @@ def _record(
     )
 
 
+def raise_card(review_id: str, *, kind: str, line: str, **fields) -> None:
+    """Put something in front of an operator without stopping the review.
+
+    A park is the loud version of this and always raises a card; this is the quiet version, for
+    the things a person should see and does not have to act on — a re-tier, a monitoring signal,
+    a dossier recalled at intake. Never raises, for the same reason a park's card never raises:
+    the card is the notification, not the thing that happened.
+    """
+    try:
+        firestore_client().collection(COLLECTION_DASHBOARD).add(
+            {
+                "kind": kind,
+                "review_id": review_id,
+                "line": line,
+                "at": datetime.now(UTC).isoformat(),
+                **fields,
+            }
+        )
+    except Exception as exc:  # noqa: BLE001 — see the docstring
+        log.error("failed to raise a %s card for %s: %s", kind, review_id, exc)
+
+
 def _dashboard_card(
     review_id: str, target: ReviewState, reason: str, gate_scope: GateScope | None
 ) -> None:

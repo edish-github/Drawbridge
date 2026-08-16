@@ -192,11 +192,17 @@ def on_plan_ready(event: EventEnvelope, review: Review) -> None:
 
         plan_version = int(plan.get("plan_version") or review.plan_version)
         delivered = already_delivered(review.review_id)
+        # Questions a prior review of this vendor answered well enough not to ask again. Read
+        # from the plan rather than recomputed here: what was asked is a property of the plan an
+        # auditor reads, not a decision the sending agent makes on the way out of the door.
+        carried = set(plan.get("carried_questions") or [])
 
         selected = select_questions(
             tier, domains, ctx, is_ai_vendor=bool(raw.get("is_ai_vendor"))
         )
-        questions = [q for q in selected if q.question_id not in delivered]
+        questions = [
+            q for q in selected if q.question_id not in delivered and q.question_id not in carried
+        ]
 
         if not questions:
             # A re-tier that adds no question the vendor has not already been asked. Nothing to

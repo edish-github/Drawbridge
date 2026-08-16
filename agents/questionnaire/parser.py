@@ -214,6 +214,16 @@ def answered_ids(review_id: str) -> set[str]:
     return {a.question_id for a in _recorded(review_id)}
 
 
+def recorded_answers(review_id: str) -> list[ParsedAnswer]:
+    """Return every recorded answer for a review, whatever its confidence.
+
+    The public read behind ``answered_ids`` and ``weak_answers``, exported because the closeout
+    that writes durable memory needs the confidence alongside the id and would otherwise
+    reimplement this query.
+    """
+    return _recorded(review_id)
+
+
 def weak_answers(review_id: str) -> list[ParsedAnswer]:
     """Return the recorded answers that fell below the confidence threshold."""
     return [a for a in _recorded(review_id) if a.needs_human]

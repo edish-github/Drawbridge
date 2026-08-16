@@ -263,7 +263,9 @@ function Entry({ entry }: { entry: Doc }) {
         ? entry.line
         : kind === "watchdog_triage"
           ? `Monitoring signal for review: ${entry.title}`
-          : transitionOf(entry));
+          : kind === "prior_review_recalled"
+            ? `Opened knowing: ${entry.line}`
+            : transitionOf(entry));
 
   return (
     <div className="entry" data-kind={kind}>

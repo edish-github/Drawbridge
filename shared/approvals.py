@@ -32,7 +32,7 @@ import logging
 from datetime import UTC, datetime
 
 from google.cloud import firestore
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from shared.clients import firestore_client
 from shared.domain import GateScope
@@ -66,6 +66,13 @@ class Approval(BaseModel):
     identity: str
     issued_at: datetime
     expires_at: datetime
+    conditions: list[str] = Field(default_factory=list)
+    """What the approver required, in their own words.
+
+    Kept here rather than in durable memory on purpose. Memory holds enumerated terms and
+    identifiers; a condition is a sentence a person wrote, and the ledger is where sentences
+    live. A later review recalls that conditions were attached and reads them from here.
+    """
 
 
 def token_for(jti: str) -> str:
@@ -107,6 +114,39 @@ def pending_token(review_id: str, scope: GateScope) -> str | None:
         if not already_spent(data.get("jti", "")):
             return token_for(data["jti"])
     return None
+
+
+def conditions_for(review_id: str) -> list[str]:
+    """Return the conditions a decision approval attached to this review, in the approver's words.
+
+    Read from the ledger rather than from durable memory, deliberately. Memory holds enumerated
+    terms and identifiers; a condition is a sentence a person typed, and a store that is
+    recalled into a prompt at the start of a future review — before any screening has run in
+    that review — is not where sentences belong. The dossier records that conditions exist and
+    names the review; this is the read that resolves them.
+
+    Raises:
+        Nothing. An unreadable approvals collection returns nothing and the caller reports the
+        conditions as unavailable rather than as absent.
+    """
+    from google.cloud.firestore_v1 import FieldFilter
+
+    try:
+        docs = (
+            firestore_client()
+            .collection(COLLECTION_APPROVALS)
+            .where(filter=FieldFilter("review_id", "==", review_id))
+            .where(filter=FieldFilter("scope", "==", "decision"))
+            .stream()
+        )
+    except Exception as exc:  # noqa: BLE001 — conditions are context, never a control
+        log.warning("could not read conditions for review=%s: %s", review_id, exc)
+        return []
+
+    out: list[str] = []
+    for doc in docs:
+        out.extend(str(c) for c in (doc.to_dict() or {}).get("conditions", []) if str(c).strip())
+    return out
 
 
 def load_approval(jti: str) -> Approval | None:
