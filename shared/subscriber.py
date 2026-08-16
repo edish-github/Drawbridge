@@ -46,8 +46,14 @@ from shared.domain import Review
 from shared.events import (
     ALL_TOPICS,
     EXPECTED_STATES,
+    TOPIC_EVIDENCE_SCREENED,
+    TOPIC_REVIEW_APPROVED,
+    TOPIC_REVIEW_FINDINGS_READY,
     TOPIC_REVIEW_INTAKE,
     TOPIC_REVIEW_PLAN_READY,
+    TOPIC_REVIEW_RESCORE,
+    TOPIC_REVIEW_SCORE_READY,
+    TOPIC_VENDOR_EVIDENCE_UPLOADED,
     TOPIC_VENDOR_REPLY_RECEIVED,
     EventEnvelope,
     MessageParked,
@@ -60,19 +66,30 @@ log = logging.getLogger("drawbridge.subscriber")
 
 PULL_BATCH = 8
 IDLE_SLEEP_SECONDS = 0.5
-PULL_TIMEOUT_SECONDS = 2.0
+PULL_TIMEOUT_SECONDS = 0.5
 """Deadline on one pull.
 
 A pull with no deadline blocks server-side until a message arrives, which would make a loop
 over several subscriptions starve every topic after the first quiet one — and would make Ctrl-C
 land inside a gRPC call rather than between messages.
+
+Short, because it is paid on every *empty* subscription on every pass: nine topics with nothing
+waiting cost nine deadlines per loop, and a longer value turns an idle worker into a slow one
+without making a busy worker any faster. A subscription holding messages returns immediately.
 """
 
 Handler = Callable[[EventEnvelope, Review], None]
 
 
-def handlers() -> dict[str, Handler]:
-    """Return the topic-to-handler table.
+def handlers() -> dict[str, list[Handler]]:
+    """Return the topic-to-handlers table.
+
+    A **list** per topic, because two components legitimately consume one event: a reply is
+    parsed by the Questionnaire agent and moves the review forward through the Orchestrator, and
+    those are different concerns rather than one handler doing both. In cloud each consumer gets
+    its own subscription and Pub/Sub does the fan-out; locally one process holds them all, and
+    this list is where the same fan-out is expressed. Order is significant — a handler that
+    reads what an earlier one wrote is listed after it.
 
     Built on call rather than at import because importing an agent resolves its model id
     through configuration, and a table built at import would make ``shared.subscriber``
@@ -82,13 +99,27 @@ def handlers() -> dict[str, Handler]:
     ``NotImplementedError`` inside the loop would nack forever and eventually dead-letter every
     message on that topic, which reads as a failure rather than as unfinished work.
     """
+    from agents.evidence import agent as evidence
     from agents.orchestrator import agent as orchestrator
     from agents.questionnaire import agent as questionnaire
+    from agents.risk_scorer import agent as risk_scorer
+    from services.screening import pipeline as screening
 
     return {
-        TOPIC_REVIEW_INTAKE: orchestrator.handle_event,
-        TOPIC_REVIEW_PLAN_READY: questionnaire.handle_event,
-        TOPIC_VENDOR_REPLY_RECEIVED: questionnaire.handle_event,
+        TOPIC_REVIEW_INTAKE: [orchestrator.handle_event],
+        TOPIC_REVIEW_PLAN_READY: [questionnaire.handle_event],
+        # The Questionnaire parses and merges the answers; the Orchestrator then decides
+        # whether the review has enough of them to move on. Parse first, decide second.
+        TOPIC_VENDOR_REPLY_RECEIVED: [
+            questionnaire.handle_event,
+            orchestrator.handle_event,
+        ],
+        TOPIC_VENDOR_EVIDENCE_UPLOADED: [screening.handle_event],
+        TOPIC_EVIDENCE_SCREENED: [evidence.handle_event],
+        TOPIC_REVIEW_FINDINGS_READY: [risk_scorer.handle_event],
+        TOPIC_REVIEW_RESCORE: [risk_scorer.handle_event],
+        TOPIC_REVIEW_SCORE_READY: [orchestrator.handle_event],
+        TOPIC_REVIEW_APPROVED: [orchestrator.handle_event],
     }
 
 
@@ -196,7 +227,8 @@ class Runner:
                     )
                     return
 
-                self.table[topic](event, review)
+                for handle in self.table[topic]:
+                    handle(event, review)
 
             except MessageParked as exc:
                 log.info("parked: %s", exc)

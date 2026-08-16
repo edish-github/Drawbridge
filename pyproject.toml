@@ -35,7 +35,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["shared", "agents", "scenarios", "scripts"]
+packages = ["shared", "agents", "scenarios", "scripts", "services"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
