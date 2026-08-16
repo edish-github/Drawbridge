@@ -41,7 +41,7 @@ from shared.checkpoint import step
 from shared.clients import firestore_client
 from shared.config import settings
 from shared.context import context_for
-from shared.domain import Finding, FindingDraft, Review
+from shared.domain import Finding, FindingDraft, MemoryNote, Review
 from shared.events import (
     TOPIC_EVIDENCE_SCREENED,
     TOPIC_REVIEW_FINDINGS_READY,
@@ -181,6 +181,7 @@ def on_evidence_screened(event: EventEnvelope, review: Review) -> None:
         )
 
         step(STEP_EVIDENCE, ctx, lambda: save_findings(findings))
+        remember_certificate_expiries(review.vendor_id, facts)
 
         contradictions = sum(1 for f in findings if f.contradiction)
         record_decision(
@@ -272,6 +273,51 @@ def service_being_bought(vendor_id: str) -> str:
     """Return the service named on the intake form, for the scope-coverage check."""
     raw = firestore_client().collection("vendors").document(vendor_id).get().to_dict() or {}
     return str((raw.get("intake") or {}).get("service_being_bought", ""))
+
+
+def remember_certificate_expiries(vendor_id: str, facts: list) -> int:
+    """Write each extracted certificate expiry to the vendor's durable dossier.
+
+    The one thing this review knows that the *next* one needs before it has read anything: a
+    date. Post-approval monitoring is date arithmetic over exactly these notes, so a review that
+    extracted an expiry and did not remember it leaves the Watchdog with nothing to sweep.
+
+    A date copied out of a certificate the fleet holds, written with ``rule`` provenance —
+    memory accepts enumerated structure and never prose, and this is the enumerated end of that
+    rule rather than an exception to it.
+
+    Raises:
+        Nothing. Memory is context rather than a control, so a rejected or failed note logs and
+        the review carries on.
+    """
+    from shared.memory import remember
+
+    written = 0
+    for doc in facts:
+        expiry = getattr(doc, "cert_expiry", None)
+        if expiry is None:
+            continue
+        try:
+            remember(
+                vendor_id,
+                MemoryNote(
+                    vendor_id=vendor_id,
+                    type="cert_expiry",
+                    provenance="rule",
+                    value={
+                        "certificate": getattr(doc, "name", "certificate"),
+                        "expires_at": expiry.isoformat(),
+                    },
+                    at=datetime.now(UTC),
+                ),
+            )
+            written += 1
+        except Exception as exc:  # noqa: BLE001 — memory is context, never a control
+            log.warning("could not remember the expiry on %s: %s", vendor_id, exc)
+
+    if written:
+        log.info("remembered %d certificate expiry date(s) for %s", written, vendor_id)
+    return written
 
 
 def unreadable_document_finding(review_id: str, doc_ref: str, exc: Exception) -> Finding:

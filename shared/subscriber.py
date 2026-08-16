@@ -56,6 +56,7 @@ from shared.events import (
     TOPIC_REVIEW_SCORE_READY,
     TOPIC_VENDOR_EVIDENCE_UPLOADED,
     TOPIC_VENDOR_REPLY_RECEIVED,
+    TOPIC_WATCHDOG_SWEEP,
     EventEnvelope,
     MessageParked,
     guard,
@@ -104,6 +105,7 @@ def handlers() -> dict[str, list[Handler]]:
     from agents.orchestrator import agent as orchestrator
     from agents.questionnaire import agent as questionnaire
     from agents.risk_scorer import agent as risk_scorer
+    from agents.watchdog import agent as watchdog
     from services.screening import pipeline as screening
 
     return {
@@ -122,6 +124,7 @@ def handlers() -> dict[str, list[Handler]]:
         TOPIC_REVIEW_RESCORE: [risk_scorer.handle_event],
         TOPIC_REVIEW_SCORE_READY: [orchestrator.handle_event],
         TOPIC_REVIEW_APPROVED: [orchestrator.handle_event],
+        TOPIC_WATCHDOG_SWEEP: [watchdog.handle_event],
     }
 
 

@@ -252,10 +252,12 @@ def test_host_extraction_lowercases():
 
 @emulator_required
 def test_p3_blocks_a_fetch_outside_the_allowlist(review_id):
-    register_tool("fetch_url", lambda **kw: "should not fetch")
+    """Against the real registered tool rather than a stub: a stub would prove that a function
+    the test wrote was not called, which is not the claim."""
+    from agents.watchdog.fetch import TOOL_FETCH_URL
 
     with pytest.raises(PolicyViolation, match="P3"):
-        call_tool("fetch_url", ctx(review_id), url="https://not-a-feed.example/data")
+        call_tool(TOOL_FETCH_URL, ctx(review_id), url="https://not-a-feed.example/data")
 
 
 def test_the_feed_allowlist_names_hosts_rather_than_patterns():
@@ -270,13 +272,18 @@ def test_the_feed_allowlist_names_hosts_rather_than_patterns():
 
 @emulator_required
 def test_p3_admits_a_host_on_the_allowlist(review_id):
-    """The allowlist has to admit something, or P3 is indistinguishable from egress being off."""
+    """The allowlist has to admit something, or P3 is indistinguishable from egress being off.
+
+    Local mode makes no outbound request, so what is asserted here is that the policy let the
+    call through to the tool — not that the network was reached."""
+    from agents.watchdog.fetch import TOOL_FETCH_URL
     from shared.gateway import FEED_ALLOWLIST
 
-    register_tool("fetch_url", lambda **kw: "advisory body")
     host = sorted(FEED_ALLOWLIST)[0]
 
-    assert call_tool("fetch_url", ctx(review_id), url=f"https://{host}/feed") == "advisory body"
+    result = call_tool(TOOL_FETCH_URL, ctx(review_id), url=f"https://{host}/feed")
+
+    assert result["url"] == f"https://{host}/feed"
 
 
 @emulator_required

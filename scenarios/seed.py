@@ -318,8 +318,16 @@ RESETTABLE_COLLECTIONS = (
     "data_scope_classifications",
     "inert_excerpts",
     "subprocessors",
+    "followups",
+    # Both are vendor-scoped rather than review-scoped, and both are cleared for the same
+    # reason: they are what makes a run *not* repeat itself. A dossier holding last run's
+    # certificate expiry and a tasks collection holding last run's signal id are exactly what a
+    # correct Watchdog deduplicates against, so leaving them would make the monitoring beat fire
+    # once on a fresh emulator and never again.
+    "dossiers",
+    "tasks",
 )
-"""Collections a reset clears. Every one is review-scoped working state.
+"""Collections a reset clears. Every one is run artefact rather than fixture.
 
 ``vendors`` is absent: a vendor record is a fixture rather than a run artefact, and clearing it
 would mean the next seed had to rebuild storage as well.

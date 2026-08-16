@@ -63,6 +63,10 @@ BEATS = (
     "decision_gate_parked",
     "decided",
     "binder_rendered",
+    # The review does not end at signature. The expiry the Evidence agent remembered is what
+    # the sweep finds, and what it opens is a new linked review rather than an edit to a
+    # decided one.
+    "monitoring_swept",
 )
 """The ordered beats a full run produces. The demo script is timed against this list, and a
 beat that does not fire is a failure rather than a variation.
@@ -215,6 +219,7 @@ def open_and_plan(demo: Demo) -> None:
     profile = load_vendor(demo.vendor)["profile"]
 
     seed_vendor(demo.vendor)
+    forget_prior_runs(demo.vendor)
     demo.review_id = open_review(profile)
     demo.beat("intake")
 
@@ -322,7 +327,74 @@ def to_a_decision(demo: Demo) -> list[str]:
     log.info("binder rendered in %.2fs → %s", time.monotonic() - started, path)
     demo.require("binder_rendered", path.exists() and path.stat().st_size > 0)
 
+    # --- monitoring ---------------------------------------------------------------------------
+    sweep(demo)
+
     return demo.fired
+
+
+def sweep(demo: Demo) -> None:
+    """Run one Watchdog pass over the decided review and assert what it opened.
+
+    Local mode fetches no feed, so this is the expiry half of the sweep — date arithmetic over
+    the certificate expiry the Evidence agent wrote to the dossier during the review. That is
+    the half that is certain rather than probable, and the half that still works when every feed
+    is down. The feed half needs the real screening service and stays fixture-driven until then.
+    """
+    from agents.watchdog.agent import on_sweep
+    from shared.events import TOPIC_WATCHDOG_SWEEP, EventEnvelope
+
+    review = demo.review()
+    event = EventEnvelope(
+        type=TOPIC_WATCHDOG_SWEEP,
+        review_id=demo.review_id,
+        idem_key=f"{demo.review_id}:plan_v{review.plan_version}:watchdog_sweep:v1",
+        trace_id=uuid.uuid4().hex,
+        source="cloud_scheduler",
+        payload={"as_of": datetime.now(UTC).date().isoformat()},
+    )
+
+    opened = on_sweep(event, review)
+    if not opened:
+        log.info("the sweep found nothing to reopen for %s", review.vendor_id)
+        return
+
+    reopened = load_review(opened[0])
+    demo.require(
+        "monitoring_swept",
+        reopened is not None
+        and reopened.reopened_from == demo.review_id
+        and demo.review().state is ReviewState.DECIDED,
+    )
+    log.info("watchdog opened review=%s, linked to %s", opened[0], demo.review_id)
+
+
+def forget_prior_runs(vendor: str) -> None:
+    """Clear the two vendor-scoped collections a previous replay of this vendor left behind.
+
+    Everything else the demo writes is scoped to a review id and a new run gets a new one. The
+    dossier and the Watchdog's actioned-signal record are scoped to the *vendor*, deliberately —
+    that is what makes durable memory durable and what stops the same expired certificate
+    opening two re-reviews. Which also means a second replay of the same vendor would find its
+    own previous run's memory and correctly decline to do anything, and a demo that fired its
+    monitoring beat once per emulator would be a demo nobody could rehearse.
+
+    A replay is a fresh world for one vendor. Only the demo does this; nothing in the fleet has
+    a path that forgets.
+    """
+    from google.cloud.firestore_v1 import FieldFilter
+
+    db = firestore_client()
+    cleared = 0
+    for collection, field in (("dossiers", "vendor_id"), ("tasks", "vendor_id")):
+        for doc in (
+            db.collection(collection).where(filter=FieldFilter(field, "==", vendor)).stream()
+        ):
+            doc.reference.delete()
+            cleared += 1
+
+    if cleared:
+        log.info("cleared %d artefact(s) from a previous replay of %s", cleared, vendor)
 
 
 def open_review(profile: dict) -> str:
