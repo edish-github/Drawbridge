@@ -31,13 +31,28 @@ Failure behaviour
 
 from __future__ import annotations
 
+import logging
+
 from google.adk import Agent
 
+from shared.checkpoint import step
+from shared.clients import firestore_client
 from shared.config import settings
-from shared.domain import ReviewPlan
-from shared.events import EventEnvelope
+from shared.context import context_for
+from shared.domain import Review, ReviewPlan, ReviewState, validate_transition
+from shared.events import TOPIC_REVIEW_INTAKE, TOPIC_REVIEW_PLAN_READY, EventEnvelope, publish
+from shared.memory import recall_dossier
+from shared.routing import park
+from shared.telemetry import record_decision, span
+
+log = logging.getLogger("drawbridge.orchestrator")
 
 SERVICE_ACCOUNT = "sa-orchestrator"
+
+STEP_PLAN = "plan"
+"""The checkpoint name the plan is recorded under. Read by the Questionnaire agent, so it is a
+constant rather than a string literal in two files.
+"""
 
 TOOLS: list = []
 """Registered through ``shared.gateway``. Empty until the tools exist; an agent with no
@@ -73,10 +88,104 @@ agent = Agent(
 )
 
 
-def handle_event(event: EventEnvelope) -> None:
-    """Pub/Sub entrypoint. Routes by ``event.type`` after the state guard.
+def handle_event(event: EventEnvelope, review: Review) -> None:
+    """Pub/Sub entrypoint. Routes by ``event.type``.
+
+    The state guard has already run in ``shared.subscriber``, so ``review`` is loaded and in a
+    state where this event makes sense. Handlers are therefore about the work rather than about
+    whether the work applies.
 
     Raises:
-        NotImplementedError: contract only.
+        UnhandledEvent: on an event type this agent has no branch for. The subscriber nacks and
+            the message redelivers rather than being acked into silence.
     """
-    raise NotImplementedError
+    if event.type == TOPIC_REVIEW_INTAKE:
+        on_intake(event, review)
+        return
+    raise UnhandledEvent(f"orchestrator has no branch for {event.type!r}")
+
+
+class UnhandledEvent(Exception):
+    """An event reached an agent with no branch for it."""
+
+
+def on_intake(event: EventEnvelope, review: Review) -> None:
+    """Tier the review, checkpoint its plan, and hand off to the Questionnaire agent.
+
+    Intake to first contact in one step: recall what is already known about the vendor, plan
+    against the tiering policy, record the plan under a checkpoint, move the review to
+    ``QUESTIONNAIRE_OUT`` and publish ``review.plan_ready``.
+
+    The plan is checkpointed **before** the state moves, so a crash between the two re-runs a
+    transition that is already legal rather than a plan that is already spent.
+
+    Raises:
+        Exception: a planning failure propagates after parking the review in ``NEEDS_HUMAN``.
+            The Orchestrator never guesses a tier: an unplanned review is a dashboard card, not
+            a default.
+    """
+    from agents.orchestrator.planner import Plan, generate_plan, load_vendor_record
+
+    ctx = context_for(event, agent="orchestrator")
+    db = firestore_client()
+
+    with span("orchestrator.intake", ctx) as s:
+        raw = db.collection("vendors").document(review.vendor_id).get().to_dict()
+        if not raw:
+            park(review.review_id, reason="vendor_record_missing")
+            raise UnhandledEvent(
+                f"no vendor record for {review.vendor_id!r}; a review cannot be tiered from an "
+                "intake event alone"
+            )
+
+        vendor = load_vendor_record(raw)
+        dossier = recall_dossier(vendor.vendor_id)
+
+        try:
+            recorded = step(
+                STEP_PLAN,
+                ctx,
+                lambda: generate_plan(vendor, dossier, ctx).model_dump(mode="json"),
+            )
+        except Exception as exc:
+            park(review.review_id, reason="planning_failed")
+            log.error("planning failed for review=%s: %s", review.review_id, exc)
+            raise
+
+        plan = Plan.model_validate(recorded)
+
+        validate_transition(review.state, ReviewState.QUESTIONNAIRE_OUT)
+        db.collection("reviews").document(review.review_id).set(
+            {
+                "state": ReviewState.QUESTIONNAIRE_OUT.value,
+                "tier": plan.tier,
+                "plan_version": plan.plan_version,
+                "gate_scope": None,
+            },
+            merge=True,
+        )
+
+        record_decision(
+            s,
+            goal=f"tier and plan the review of {vendor.name}",
+            decision=f"Tier {plan.tier}: {plan.reason}",
+        )
+
+        publish(
+            TOPIC_REVIEW_PLAN_READY,
+            review.review_id,
+            {
+                "tier": plan.tier,
+                "plan_version": plan.plan_version,
+                "domains": plan.domains,
+                "vendor_id": vendor.vendor_id,
+            },
+            ctx=ctx,
+        )
+
+    log.info(
+        "review=%s tiered %d and planned; %s",
+        review.review_id,
+        plan.tier,
+        plan.reason,
+    )

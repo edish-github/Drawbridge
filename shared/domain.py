@@ -83,6 +83,18 @@ screening runs in that review, so it accepts enumerated structure and never free
 
 
 class Vendor(BaseModel):
+    """A vendor and the intake form that opened its review.
+
+    ``intake`` holds the enumerated declarations a tier decision is computed from — data
+    categories, system access — alongside the requester's free-text description. The two are
+    kept in one place and used differently: the enumerated fields decide the tier, the prose
+    is only ever context for a model's stated reason. The person filling the form wants the
+    contract signed, so nothing they wrote as a sentence is allowed to lower scrutiny.
+
+    ``contact`` holds the vendor-side recipient. It is the target an approval token is scoped
+    to, which is why it lives on the record rather than being read from a message.
+    """
+
     vendor_id: str
     name: str
     category: str
@@ -92,6 +104,8 @@ class Vendor(BaseModel):
     tier: int = 2
     status: str = "active"
     adversarial_flag: bool = False
+    intake: dict = Field(default_factory=dict)
+    contact: dict = Field(default_factory=dict)
 
 
 class TierChange(BaseModel):
@@ -193,10 +207,11 @@ class ScoreResult(BaseModel):
 
 
 class PlanStep(BaseModel):
-    """One step of a review plan.
+    """One step of a persisted review plan.
 
     ``name`` must come from the step vocabulary supplied in the planning prompt. Step names are
     deterministic from workflow position because the idempotency key is derived from them.
+    ``params`` is assigned by the code that persists the plan, never by the model.
     """
 
     name: str
@@ -206,14 +221,26 @@ class PlanStep(BaseModel):
 class ReviewPlan(BaseModel):
     """The Orchestrator's planning output.
 
+    ``steps`` is a list of bare step *names* rather than of ``PlanStep``. Two reasons, and the
+    second is the one that would have bitten later: parameters are workflow data the executor
+    fills in from the tier and the plan version, so a model assigning them would be assigning
+    values it cannot know; and an open ``dict`` in a response schema compiles to
+    ``additionalProperties``, which Vertex AI accepts and the Gemini Developer API rejects
+    outright. A schema that only validates on one backend is a mode-specific failure waiting for
+    the switch to flip.
+
     ``needs_human`` is the defined non-compliance path: when the work required has no name in
     the step vocabulary, the model returns ``needs_human=True`` with a reason rather than
     inventing a step name that nothing downstream can execute.
     """
 
-    tier: Literal[1, 2, 3]
+    # A bounded integer rather than Literal[1, 2, 3]: google-genai renders a Literal as a schema
+    # enum, and the SDK's enum accepts strings only, so an integer Literal fails validation
+    # before the request is ever sent. The range constraint says the same thing and survives the
+    # round trip.
+    tier: int = Field(ge=1, le=3)
     reason: str
-    steps: list[PlanStep] = Field(default_factory=list)
+    steps: list[str] = Field(default_factory=list)
     needs_human: bool = False
 
 
