@@ -2,8 +2,18 @@
 
 Mission
     Turn an intake request into a tiered review plan, dispatch its steps, re-evaluate the
-    tier as evidence arrives, enforce the human gates, and own the review's state. It is the
-    only agent that writes review state.
+    tier as evidence arrives, enforce the human gates, and own the review's forward progress.
+
+State ownership
+    The Orchestrator owns the review's plan and every **forward** transition. Any component
+    may **park** a review — into ``GATED`` or ``NEEDS_HUMAN`` — through the shared ``park()``
+    helper, which validates the transition, writes the event and the dashboard card. Nothing
+    else writes review state.
+
+    In one line: anything can stop a review, only the Orchestrator can advance one. Requiring
+    a park to travel through here would mean a lost message leaves a review claiming to be in
+    flight after it has already stopped, which is the worse of the two inconsistencies.
+    ``tests/test_state_ownership.py`` asserts the rule against the source tree.
 
 Trigger
     ``review.intake``, plus the follow-ons it coordinates: ``review.plan_ready``,
@@ -32,6 +42,7 @@ Failure behaviour
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from google.adk import Agent
 
@@ -39,10 +50,18 @@ from shared.checkpoint import step
 from shared.clients import firestore_client
 from shared.config import settings
 from shared.context import context_for
-from shared.domain import Review, ReviewPlan, ReviewState, validate_transition
-from shared.events import TOPIC_REVIEW_INTAKE, TOPIC_REVIEW_PLAN_READY, EventEnvelope, publish
+from shared.domain import Review, ReviewPlan, ReviewState
+from shared.events import (
+    TOPIC_REVIEW_APPROVED,
+    TOPIC_REVIEW_INTAKE,
+    TOPIC_REVIEW_PLAN_READY,
+    TOPIC_REVIEW_SCORE_READY,
+    TOPIC_VENDOR_REPLY_RECEIVED,
+    EventEnvelope,
+    publish,
+)
 from shared.memory import recall_dossier
-from shared.routing import park
+from shared.state import advance, park
 from shared.telemetry import record_decision, span
 
 log = logging.getLogger("drawbridge.orchestrator")
@@ -99,10 +118,16 @@ def handle_event(event: EventEnvelope, review: Review) -> None:
         UnhandledEvent: on an event type this agent has no branch for. The subscriber nacks and
             the message redelivers rather than being acked into silence.
     """
-    if event.type == TOPIC_REVIEW_INTAKE:
-        on_intake(event, review)
-        return
-    raise UnhandledEvent(f"orchestrator has no branch for {event.type!r}")
+    handler = {
+        TOPIC_REVIEW_INTAKE: on_intake,
+        TOPIC_VENDOR_REPLY_RECEIVED: on_reply_received,
+        TOPIC_REVIEW_SCORE_READY: on_score_ready,
+        TOPIC_REVIEW_APPROVED: on_approved,
+    }.get(event.type)
+
+    if handler is None:
+        raise UnhandledEvent(f"orchestrator has no branch for {event.type!r}")
+    handler(event, review)
 
 
 class UnhandledEvent(Exception):
@@ -154,15 +179,12 @@ def on_intake(event: EventEnvelope, review: Review) -> None:
 
         plan = Plan.model_validate(recorded)
 
-        validate_transition(review.state, ReviewState.QUESTIONNAIRE_OUT)
-        db.collection("reviews").document(review.review_id).set(
-            {
-                "state": ReviewState.QUESTIONNAIRE_OUT.value,
-                "tier": plan.tier,
-                "plan_version": plan.plan_version,
-                "gate_scope": None,
-            },
-            merge=True,
+        advance(
+            review,
+            ReviewState.QUESTIONNAIRE_OUT,
+            reason=f"Tier {plan.tier}: {plan.reason}",
+            tier=plan.tier,
+            plan_version=plan.plan_version,
         )
 
         record_decision(
@@ -189,3 +211,169 @@ def on_intake(event: EventEnvelope, review: Review) -> None:
         plan.tier,
         plan.reason,
     )
+
+
+def on_reply_received(event: EventEnvelope, review: Review) -> None:
+    """Move the review forward as replies arrive, and open evidence review when there are enough.
+
+    Runs after the Questionnaire agent has parsed and merged the same event, so the coverage it
+    reads is current. Two transitions live here and nowhere else:
+
+    ``QUESTIONNAIRE_OUT -> REPLIES_IN`` on the first reply, and ``REPLIES_IN ->
+    EVIDENCE_REVIEW`` once the answered proportion crosses the threshold — or once an analyst
+    has marked the thread complete, which is what happens when a vendor simply stops replying
+    and the chase rounds are spent. Reconciling below the threshold produces gaps that describe
+    the process rather than the vendor, which is why it waits.
+    """
+    from agents.questionnaire.parser import COVERAGE_TO_PROCEED, coverage
+
+    ctx = context_for(event, agent="orchestrator")
+
+    with span("orchestrator.replies", ctx) as s:
+        if review.state is ReviewState.QUESTIONNAIRE_OUT:
+            advance(review, ReviewState.REPLIES_IN, reason="first reply received")
+            review = review.model_copy(update={"state": ReviewState.REPLIES_IN})
+
+        reached = coverage(review.review_id)
+        forced = replies_marked_complete(review.review_id)
+
+        if reached < COVERAGE_TO_PROCEED and not forced:
+            record_decision(
+                s,
+                goal="decide whether the review has enough answers to reconcile",
+                decision=f"coverage {reached:.0%}, below {COVERAGE_TO_PROCEED:.0%}; still waiting",
+            )
+            return
+
+        advance(
+            review,
+            ReviewState.EVIDENCE_REVIEW,
+            reason=(
+                f"coverage {reached:.0%}"
+                if not forced
+                else f"analyst proceeded at {reached:.0%} coverage"
+            ),
+        )
+        record_decision(
+            s,
+            goal="decide whether the review has enough answers to reconcile",
+            decision=f"opened evidence review at {reached:.0%} coverage",
+        )
+        log.info(
+            "review=%s opened evidence review at %.0f%% coverage%s",
+            review.review_id,
+            reached * 100,
+            " (analyst proceeded)" if forced else "",
+        )
+
+
+def replies_marked_complete(review_id: str) -> bool:
+    """Return whether an analyst has declared the reply thread finished.
+
+    The escape hatch for the ordinary case where a vendor answers most of what was asked and
+    stops. Without it a review waits on a threshold no real correspondence reaches, which looks
+    like the fleet hanging rather than like the fleet waiting.
+    """
+    snap = firestore_client().collection("reviews").document(review_id).get()
+    return bool((snap.to_dict() or {}).get("replies_complete", False))
+
+
+def on_score_ready(event: EventEnvelope, review: Review) -> None:
+    """Park the scored review at the decision gate.
+
+    Two movements, and they are separate on purpose. ``EVIDENCE_REVIEW -> SCORED`` is forward
+    progress: the review now has a number, and that is a fact about the review rather than a
+    wait. ``SCORED -> GATED`` is the wait — a named human accepting the risk — which is a park,
+    carrying ``gate_scope="decision"`` so a release can only reach ``DECIDED`` and never resume
+    the questionnaire.
+
+    Collapsing them would put a review into a gate without ever recording that it was scored,
+    and the binder's timeline would show a decision gate opening for a review with no scoring
+    event behind it.
+    """
+    ctx = context_for(event, agent="orchestrator")
+    score = event.payload.get("score")
+    band = event.payload.get("band")
+
+    with span("orchestrator.decision_gate", ctx) as s:
+        if review.state is not ReviewState.SCORED:
+            advance(
+                review,
+                ReviewState.SCORED,
+                reason=f"Trust Score {score} ({band})",
+                score=score,
+                band=band,
+            )
+            review = review.model_copy(update={"state": ReviewState.SCORED})
+
+        park(
+            review.review_id,
+            reason=f"awaiting risk acceptance · score {score} · band {band}",
+            target=ReviewState.GATED,
+            gate_scope="decision",
+        )
+        record_decision(
+            s,
+            goal="decide whether the review can close",
+            decision=f"scored {score} ({band}); parked for a named human to accept the risk",
+        )
+
+
+def on_approved(event: EventEnvelope, review: Review) -> None:
+    """Release a gate a human has approved, and resume the path it was blocking.
+
+    The approval service publishes ``review.approved``; the release itself happens here,
+    because it is a forward transition. A contact gate resumes the questionnaire by
+    republishing ``review.plan_ready``; a decision gate closes the review.
+
+    Raises:
+        UnhandledEvent: on an approval whose scope does not match the gate the review is
+            parked at. An approval spent on the wrong gate is the failure the scope exists to
+            prevent, so a mismatch stops rather than guessing.
+    """
+    ctx = context_for(event, agent="orchestrator")
+    scope = event.payload.get("scope")
+    identity = event.payload.get("identity", "unknown")
+
+    if scope != review.gate_scope:
+        raise UnhandledEvent(
+            f"approval scoped {scope!r} presented for a review parked at "
+            f"{review.gate_scope!r}; an approval is never portable between gates"
+        )
+
+    with span("orchestrator.gate_release", ctx, gate_scope=scope) as s:
+        if scope == "contact":
+            advance(
+                review,
+                ReviewState.QUESTIONNAIRE_OUT,
+                reason=f"contact approved by {identity}",
+                gate_scope="contact",
+                gate_released_by=identity,
+            )
+            publish(
+                TOPIC_REVIEW_PLAN_READY,
+                review.review_id,
+                {
+                    "tier": review.tier,
+                    "plan_version": review.plan_version,
+                    "released_by": identity,
+                },
+                ctx=ctx,
+            )
+        else:
+            advance(
+                review,
+                ReviewState.DECIDED,
+                reason=f"risk accepted by {identity}",
+                gate_scope="decision",
+                gate_released_by=identity,
+                decided_at=datetime.now(UTC).isoformat(),
+            )
+
+        record_decision(
+            s,
+            goal=f"release the {scope} gate",
+            decision=f"released by {identity}",
+        )
+
+    log.info("review=%s %s gate released by %s", review.review_id, scope, identity)

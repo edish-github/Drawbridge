@@ -324,6 +324,8 @@ def accumulate_review_cost(review_id: str, cost: float) -> float:
     """
     from google.cloud import firestore
 
+    from shared.state import park
+
     cfg = settings()
     ref = firestore_client().collection(COLLECTION_REVIEWS).document(review_id)
     ref.set({"cost_usd": firestore.Increment(cost)}, merge=True)
@@ -337,20 +339,3 @@ def accumulate_review_cost(review_id: str, cost: float) -> float:
     return total
 
 
-def park(review_id: str, *, reason: str) -> None:
-    """Move a review to ``NEEDS_HUMAN`` with a stated reason and surface it on the dashboard.
-
-    Lives here rather than in a service module because three kernel modules need it — the cost
-    ceiling, the screening pipeline and output screening all park — and a review that is
-    parked by one path and not another is the kind of inconsistency nobody finds until a demo.
-    """
-    from shared.domain import ReviewState
-
-    firestore_client().collection(COLLECTION_REVIEWS).document(review_id).set(
-        {
-            "state": ReviewState.NEEDS_HUMAN.value,
-            "park_reason": reason,
-        },
-        merge=True,
-    )
-    log.warning("PARKED review=%s reason=%s", review_id, reason)

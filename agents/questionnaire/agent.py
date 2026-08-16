@@ -32,6 +32,7 @@ Failure behaviour
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from google.adk import Agent
 
@@ -40,11 +41,16 @@ from shared.checkpoint import completed_steps, step, step_result
 from shared.clients import firestore_client
 from shared.config import settings
 from shared.context import context_for
-from shared.domain import Review, ReviewState, validate_transition
-from shared.events import TOPIC_REVIEW_PLAN_READY, EventEnvelope
+from shared.domain import Review, ReviewState
+from shared.events import (
+    TOPIC_REVIEW_PLAN_READY,
+    TOPIC_VENDOR_REPLY_RECEIVED,
+    EventEnvelope,
+)
 from shared.gateway import PolicyViolation, call_tool
 from shared.idempotency import key_for
 from shared.idempotency import once as run_once
+from shared.state import park
 from shared.telemetry import record_decision, span
 
 log = logging.getLogger("drawbridge.questionnaire")
@@ -107,6 +113,9 @@ def handle_event(event: EventEnvelope, review: Review) -> None:
     """
     if event.type == TOPIC_REVIEW_PLAN_READY:
         on_plan_ready(event, review)
+        return
+    if event.type == TOPIC_VENDOR_REPLY_RECEIVED:
+        on_reply_received(event, review)
         return
     raise UnhandledEvent(f"questionnaire has no branch for {event.type!r}")
 
@@ -226,26 +235,126 @@ def on_plan_ready(event: EventEnvelope, review: Review) -> None:
         )
 
 
-def park_at_contact_gate(review: Review, *, reason: str) -> None:
-    """Move the review to ``GATED`` with ``gate_scope="contact"`` and raise the approval card.
+def on_reply_received(event: EventEnvelope, review: Review) -> None:
+    """Screen, parse and merge one vendor reply, and move on when coverage is enough.
 
-    The scope is what makes the park releasable: a contact gate releases to
-    ``QUESTIONNAIRE_OUT`` and nothing else, so approving first contact can never be mistaken
-    later for approving the vendor.
+    Replies arrive across days and partially, so this is incremental by construction: each
+    message is parsed on its own, merged by question id, and the review only moves forward when
+    the answered proportion crosses ``COVERAGE_TO_PROCEED``. Below that, reconciling would
+    produce gaps that describe the process rather than the vendor.
+
+    **The body arriving here has already been screened**, by ``services.vendor_inbox``, which is
+    the component that receives it. Same shape as evidence: the service that first touches
+    external bytes screens them and publishes; the agent consumes what was published. An
+    injection in a reply body is the likelier vector in reality than one in a PDF, and it is
+    blocked, recorded and capable of raising Adversarial Conduct before this agent — or any
+    model it calls — ever sees the text.
+
+    Raises:
+        UnhandledEvent: on a reply carrying no body, or one with no screening record. A reply
+            that reached this handler unscreened is a routing bug, and parsing it would put
+            unscreened external content in front of a model.
     """
-    validate_transition(review.state, ReviewState.GATED, gate_scope="contact")
+    from agents.questionnaire.parser import (
+        coverage,
+        merge_responses,
+        parse_reply,
+    )
 
+    ctx = context_for(event, agent="questionnaire")
+    body = str(event.payload.get("body", ""))
+    source_msg = str(event.payload.get("message_id", event.event_id))
+
+    with span("questionnaire.reply", ctx, message=source_msg) as s:
+        if not body.strip():
+            raise UnhandledEvent(f"reply {source_msg} for {review.review_id} carries no body")
+
+        require_screening_record(review.review_id, source_msg)
+
+        answers = parse_reply(body, review.review_id, ctx, source_msg=source_msg)
+        merge_responses(review.review_id, answers, source_msg)
+
+        reached = coverage(review.review_id)
+        note_reply_arrival(review)
+
+        record_decision(
+            s,
+            goal=f"parse reply {source_msg}",
+            decision=(
+                f"{len(answers)} answer(s) recorded, "
+                f"{sum(1 for a in answers if a.needs_human)} below threshold; "
+                f"coverage {reached:.0%}"
+            ),
+        )
+        log.info(
+            "review=%s reply %s: %d answer(s), coverage now %.0f%%",
+            review.review_id,
+            source_msg,
+            len(answers),
+            reached * 100,
+        )
+
+
+def require_screening_record(review_id: str, source_msg: str) -> None:
+    """Refuse to parse a reply that has no screening record.
+
+    Not a re-screen — screening happened in ``services.vendor_inbox``, and repeating it here
+    would put the same bytes through twice and record two verdicts for one message. This checks
+    that it happened at all, so a reply published by something that skipped the inbox cannot
+    reach a model just because it arrived on the right topic.
+
+    Raises:
+        UnhandledEvent: when no screening record exists for this message.
+    """
+    from google.cloud.firestore_v1 import FieldFilter
+
+    from shared.armor import COLLECTION_SCREENINGS
+
+    records = (
+        firestore_client()
+        .collection(COLLECTION_SCREENINGS)
+        .where(filter=FieldFilter("review_id", "==", review_id))
+        .where(filter=FieldFilter("origin_ref", "==", f"reply:{source_msg}"))
+        .limit(1)
+        .stream()
+    )
+    if not any(True for _ in records):
+        raise UnhandledEvent(
+            f"reply {source_msg} for {review_id} has no screening record. Replies are screened "
+            "by services.vendor_inbox before they are published; an unscreened body is not "
+            "parsed."
+        )
+
+
+def note_reply_arrival(review: Review) -> None:
+    """Record that a reply arrived, without moving the review.
+
+    ``QUESTIONNAIRE_OUT -> REPLIES_IN`` is forward progress and belongs to the Orchestrator,
+    which consumes the same event and decides. This writes a timestamp so the dashboard shows
+    movement and leaves the state alone.
+    """
     firestore_client().collection("reviews").document(review.review_id).set(
-        {
-            "state": ReviewState.GATED.value,
-            "gate_scope": "contact",
-            "gate_reason": reason,
-        },
-        merge=True,
+        {"last_reply_at": datetime.now(UTC).isoformat()}, merge=True
+    )
+
+
+def park_at_contact_gate(review: Review, *, reason: str) -> None:
+    """Stop the review at the contact gate and raise the approval card.
+
+    A park, not a transition: the agent that hits the gate is the agent that records the wait,
+    and ``shared.state.park`` is available to every component for exactly this. The scope is
+    what makes the park releasable — a contact gate releases to ``QUESTIONNAIRE_OUT`` and
+    nothing else, so approving first contact can never be mistaken later for approving the
+    vendor. The release itself is a forward transition and belongs to the Orchestrator.
+    """
+    park(
+        review.review_id,
+        reason=reason,
+        target=ReviewState.GATED,
+        gate_scope="contact",
     )
     log.warning(
-        "review=%s parked at the contact gate — %s. Release it with an approval scoped to "
-        "this review.",
+        "review=%s is waiting on a human to authorise first contact. Release it with an "
+        "approval scoped to this review.",
         review.review_id,
-        reason,
     )

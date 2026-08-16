@@ -76,6 +76,24 @@ STUB_TEMPLATE = "local-stub"
 ledger or the binder is identifiable at a glance rather than by provenance archaeology.
 """
 
+SEEDED_TEMPLATE = "local-seed"
+"""The template id on a fixture placed into the clean bucket by ``scenarios.seed``.
+
+Local mode cannot promote anything: the stub is untrustworthy by construction, so the screening
+pipeline correctly refuses, and the Evidence agent would have nothing to read. The fixture
+loader solves that *downstream* of the pipeline by writing pre-extracted documents into the
+clean bucket directly — and this constant is what stops that shortcut becoming a lie. A seeded
+stamp is as untrustworthy as a stub one to everything that checks, so it can never be mistaken
+for a verdict in the ledger or the binder.
+
+Nothing in this module produces it. It is declared here because this is where trustworthiness
+is decided, and a label defined by the thing it is supposed to constrain would constrain
+nothing.
+"""
+
+UNTRUSTED_TEMPLATES: frozenset[str] = frozenset({STUB_TEMPLATE, SEEDED_TEMPLATE})
+"""Template ids that never carry a real verdict, whatever else they say."""
+
 COLLECTION_SCREENINGS = "screenings"
 COLLECTION_EXCERPTS = "inert_excerpts"
 
@@ -130,9 +148,14 @@ class ScreenResult(BaseModel):
     screened_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @property
-    def is_stub(self) -> bool:
-        """Whether this verdict came from the local stub rather than the real service."""
-        return self.template == STUB_TEMPLATE
+    def is_untrusted(self) -> bool:
+        """Whether this verdict came from something other than the real screening service.
+
+        Covers both the local stub and a seeded fixture. Neither executed a detector, so
+        neither is a verdict, and the distinction between them matters to a reader of the
+        ledger but not to any control.
+        """
+        return self.template in UNTRUSTED_TEMPLATES
 
     def threat_found(self) -> bool:
         """Whether any blocking filter matched."""
@@ -162,10 +185,11 @@ def verdict_is_trustworthy(result: ScreenResult) -> bool:
     skipped execution state for specific detectors on specific content, and code that reads only
     the match state cannot tell the two apart.
 
-    A stub verdict is never trustworthy. That is what keeps local mode honest: the pipeline
-    shape runs, and nothing a stub screened is admissible to a model.
+    A stub or seeded verdict is never trustworthy. That is what keeps local mode honest: the
+    pipeline shape runs, and nothing a stub screened — or a fixture loader placed — is
+    admissible to a model on the strength of its stamp.
     """
-    if result.is_stub:
+    if result.is_untrusted:
         return False
     return all(result.execution.get(f) == EXECUTION_SUCCESS for f in CRITICAL_FILTERS)
 
@@ -179,7 +203,7 @@ def _screen(text: str, review_id: str, template: str, origin_ref: str) -> Screen
         ArmorSkipped: when a critical filter did not execute. The review parks with reason
             ``armor_detector_skipped`` and no clean-stamp is issued.
     """
-    from shared.routing import park
+    from shared.state import park
 
     cfg = settings()
 

@@ -9,14 +9,19 @@ approval. ``shared.approvals`` reads and retires tokens and has no issue functio
 ``gateway.issue_approval_token`` raises. This file is the only place in the repository that
 writes to the ``approvals`` collection.
 
-Three things happen, in this order:
+Two things happen, in this order:
 
-1. An approval is recorded, scoped to one review, one gate and one recipient address.
-2. The review is released from ``GATED`` to ``QUESTIONNAIRE_OUT``. A contact gate releases to
-   exactly one state, which is what stops an approval of first contact from later reading as an
-   approval of the vendor.
-3. ``review.plan_ready`` is republished, so the Questionnaire agent resumes on the normal path
-   rather than through a special-case resume routine.
+1. An approval is recorded, scoped to one review, one gate and one target.
+2. ``review.approved`` is published.
+
+**This script does not move the review.** Releasing a gate is a forward transition, and the
+Orchestrator owns those — it consumes ``review.approved``, validates the release against the
+scope the review was parked at, and resumes the path the gate was blocking. An approvals
+service that could also transition would be a second component advancing reviews, which is
+exactly the ownership this project spent a rule on.
+
+Both gates are supported. ``--scope contact`` releases G2, first outbound contact.
+``--scope decision`` releases G1, the risk acceptance, and closes the review.
 
 The token itself is not secret in local mode and is not pretending to be: verification is a
 record lookup, and what stops an agent writing its own approval is collection-level IAM.
@@ -38,8 +43,8 @@ from datetime import UTC, datetime, timedelta
 from shared.approvals import COLLECTION_APPROVALS, Approval, token_for
 from shared.clients import firestore_client
 from shared.context import AgentContext
-from shared.domain import ReviewState, validate_transition
-from shared.events import TOPIC_REVIEW_PLAN_READY, load_review, publish
+from shared.domain import ReviewState
+from shared.events import TOPIC_REVIEW_APPROVED, load_review, publish
 
 DEFAULT_TTL_MINUTES = 60
 GATE_RELEASE = {
@@ -66,9 +71,7 @@ def issue(review_id: str, *, scope: str, identity: str, ttl_minutes: int) -> str
 
     db = firestore_client()
     vendor = db.collection("vendors").document(review.vendor_id).get().to_dict() or {}
-    target = (vendor.get("contact") or {}).get("email", "")
-    if not target:
-        raise GateNotOpen(f"vendor {review.vendor_id!r} has no contact address to authorise")
+    target = _target_for(scope, review, vendor)
 
     now = datetime.now(UTC)
     approval = Approval(
@@ -84,25 +87,34 @@ def issue(review_id: str, *, scope: str, identity: str, ttl_minutes: int) -> str
         approval.model_dump(mode="json")
     )
 
-    validate_transition(review.state, GATE_RELEASE[scope], gate_scope=scope)
-    db.collection("reviews").document(review_id).set(
-        {
-            "state": GATE_RELEASE[scope].value,
-            "gate_scope": None,
-            "gate_released_by": identity,
-            "gate_released_at": now.isoformat(),
-        },
-        merge=True,
-    )
-
     ctx = AgentContext(review_id=review_id, agent="approvals", trace_id=uuid.uuid4().hex)
     publish(
-        TOPIC_REVIEW_PLAN_READY,
+        TOPIC_REVIEW_APPROVED,
         review_id,
-        {"tier": review.tier, "plan_version": review.plan_version, "released_by": identity},
+        {"scope": scope, "identity": identity, "jti": approval.jti},
         ctx=ctx,
     )
     return token_for(approval.jti)
+
+
+def _target_for(scope: str, review, vendor: dict) -> str:
+    """Return what this approval authorises.
+
+    A contact approval authorises one recipient address, so P1 can check that the address about
+    to be emailed is the one a human agreed to. A decision approval authorises closing one
+    review, so the review id is the target — there is no address involved, and inventing one
+    would make the scope check compare two unrelated things.
+
+    Raises:
+        GateNotOpen: when a contact approval has no address to be scoped to.
+    """
+    if scope != "contact":
+        return review.review_id
+
+    target = (vendor.get("contact") or {}).get("email", "")
+    if not target:
+        raise GateNotOpen(f"vendor {review.vendor_id!r} has no contact address to authorise")
+    return target
 
 
 def main() -> int:
@@ -130,7 +142,10 @@ def main() -> int:
 
     print(f"approval issued for {args.review_id} · scope={args.scope} · by {args.identity}")
     print(f"token {token}")
-    print(f"review released to {GATE_RELEASE[args.scope].value}; review.plan_ready republished")
+    print(
+        f"review.approved published; the Orchestrator will release the gate to "
+        f"{GATE_RELEASE[args.scope].value}"
+    )
     return 0
 
 
