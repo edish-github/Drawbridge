@@ -17,6 +17,7 @@ dependencies = [
     "opentelemetry-sdk==1.43.0",
     "opentelemetry-exporter-gcp-trace==1.14.0",
     "pydantic==2.13.4",
+    "pypdf==6.4.0",
     "python-dotenv==1.2.2",
     "PyYAML==6.0.3",
     "fastapi==0.141.1",
