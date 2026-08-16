@@ -79,7 +79,12 @@ log "  PUBSUB_EMULATOR_HOST=${PUBSUB_HOST}"
 # Same topology as infra/bootstrap.sh, read from the same topic list, so local mode has the
 # real event backbone rather than an approximation of it.
 log "creating topics and subscriptions in the emulator"
+# Prefer the repository virtualenv when there is one; CI installs into the runner's own
+# interpreter and has no .venv to reach for.
+PY="${REPO_ROOT}/.venv/bin/python"
+[ -x "${PY}" ] || PY="$(command -v python3 || command -v python)"
+
 FIRESTORE_EMULATOR_HOST="${FIRESTORE_HOST}" PUBSUB_EMULATOR_HOST="${PUBSUB_HOST}" \
-  "${REPO_ROOT}/.venv/bin/python" -m scripts.local_topics
+  "${PY}" -m scripts.local_topics
 
 log "stop them with: make emulators-stop"

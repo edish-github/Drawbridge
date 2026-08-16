@@ -1,4 +1,5 @@
-.PHONY: help bootstrap emulators emulators-stop seed run-local deploy demo teardown test lint probe
+.PHONY: help bootstrap emulators emulators-stop seed run-local dev-ui open-review deploy demo \
+        teardown test lint probe
 
 PYTHON ?= python
 
@@ -22,8 +23,14 @@ emulators-stop: ## stop the emulators
 seed: emulators ## load synthetic vendors into Firestore + Storage
 	$(PYTHON) -m scenarios.seed
 
-run-local: emulators ## ADK dev UI against the agent packages
+run-local: emulators ## run the worker: pull events, dispatch to agents, acknowledge
+	$(PYTHON) -m scripts.run_local
+
+dev-ui:         ## ADK dev UI against the agent packages, for inspecting one agent
 	adk web agents/
+
+open-review:    ## open a review for a synthetic vendor (VENDOR=nimbuswrite)
+	$(PYTHON) -m scripts.open_review --vendor $(or $(VENDOR),nimbuswrite)
 
 deploy:         ## build + push + deploy agents and services
 	./infra/deploy/deploy_all.sh
