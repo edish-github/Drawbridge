@@ -191,6 +191,7 @@ def on_intake(event: EventEnvelope, review: Review) -> None:
             s,
             goal=f"tier and plan the review of {vendor.name}",
             decision=f"Tier {plan.tier}: {plan.reason}",
+            ctx=ctx,
         )
 
         publish(
@@ -224,7 +225,13 @@ def on_reply_received(event: EventEnvelope, review: Review) -> None:
     has marked the thread complete, which is what happens when a vendor simply stops replying
     and the chase rounds are spent. Reconciling below the threshold produces gaps that describe
     the process rather than the vendor, which is why it waits.
+
+    Re-tiering runs before either decision, because a review that has just become a Tier 1 is
+    measured against sixty questions rather than thirty, and deciding coverage against the plan
+    it is replacing would open evidence review on a questionnaire that had already been
+    superseded.
     """
+    from agents.orchestrator.retier import reassess_tier
     from agents.questionnaire.parser import COVERAGE_TO_PROCEED, coverage
 
     ctx = context_for(event, agent="orchestrator")
@@ -234,6 +241,12 @@ def on_reply_received(event: EventEnvelope, review: Review) -> None:
             advance(review, ReviewState.REPLIES_IN, reason="first reply received")
             review = review.model_copy(update={"state": ReviewState.REPLIES_IN})
 
+        retiered = reassess_tier(ctx, review)
+        if retiered.tier != review.tier:
+            resume_questionnaire(retiered, review, ctx, s)
+            return
+        review = retiered
+
         reached = coverage(review.review_id)
         forced = replies_marked_complete(review.review_id)
 
@@ -242,6 +255,7 @@ def on_reply_received(event: EventEnvelope, review: Review) -> None:
                 s,
                 goal="decide whether the review has enough answers to reconcile",
                 decision=f"coverage {reached:.0%}, below {COVERAGE_TO_PROCEED:.0%}; still waiting",
+                ctx=ctx,
             )
             return
 
@@ -258,6 +272,7 @@ def on_reply_received(event: EventEnvelope, review: Review) -> None:
             s,
             goal="decide whether the review has enough answers to reconcile",
             decision=f"opened evidence review at {reached:.0%} coverage",
+            ctx=ctx,
         )
         log.info(
             "review=%s opened evidence review at %.0f%% coverage%s",
@@ -265,6 +280,51 @@ def on_reply_received(event: EventEnvelope, review: Review) -> None:
             reached * 100,
             " (analyst proceeded)" if forced else "",
         )
+
+
+def resume_questionnaire(retiered: Review, previous: Review, ctx, s) -> None:
+    """Send the additional questions a re-tier produced, and stop reconciling for now.
+
+    The review goes back to ``QUESTIONNAIRE_OUT`` — the documented backward transition, and the
+    only legitimate one inside a single review — and ``review.plan_ready`` is republished under
+    the new plan version. The Questionnaire agent sends the difference between the new question
+    set and what the vendor has already received, so the vendor gets the additional domain's
+    questions and nothing twice.
+
+    This returns without evaluating coverage on purpose. Coverage is measured against the plan,
+    the plan has just been replaced, and a review that opened evidence review on the strength of
+    a superseded questionnaire would be reconciling thirty answers against sixty questions and
+    calling the difference a finding about the vendor.
+    """
+    advance(
+        retiered,
+        ReviewState.QUESTIONNAIRE_OUT,
+        reason=(
+            f"re-tiered {previous.tier} -> {retiered.tier}; additional questions going out under "
+            f"plan v{retiered.plan_version}"
+        ),
+        tier=retiered.tier,
+        plan_version=retiered.plan_version,
+    )
+    publish(
+        TOPIC_REVIEW_PLAN_READY,
+        retiered.review_id,
+        {
+            "tier": retiered.tier,
+            "plan_version": retiered.plan_version,
+            "retiered_from": previous.tier,
+        },
+        ctx=ctx,
+    )
+    record_decision(
+        s,
+        goal="decide whether the evidence so far matches the tier the intake form declared",
+        decision=(
+            f"it does not — re-tiered {previous.tier} to {retiered.tier} and re-planned; "
+            f"{retiered.tier_history[-1].source_ref} is the answer that caused it"
+        ),
+        ctx=ctx,
+    )
 
 
 def replies_marked_complete(review_id: str) -> bool:
@@ -316,6 +376,7 @@ def on_score_ready(event: EventEnvelope, review: Review) -> None:
             s,
             goal="decide whether the review can close",
             decision=f"scored {score} ({band}); parked for a named human to accept the risk",
+            ctx=ctx,
         )
 
 
@@ -374,6 +435,7 @@ def on_approved(event: EventEnvelope, review: Review) -> None:
             s,
             goal=f"release the {scope} gate",
             decision=f"released by {identity}",
+            ctx=ctx,
         )
 
     log.info("review=%s %s gate released by %s", review.review_id, scope, identity)

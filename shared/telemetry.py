@@ -154,15 +154,51 @@ def set_content_refs(s, *, ref: str, sha256: str, verdict: str) -> None:
     s.set_attribute("verdict", verdict)
 
 
-def record_decision(s, *, goal: str, decision: str) -> None:
+COLLECTION_DECISIONS = "decisions"
+
+
+def record_decision(s, *, goal: str, decision: str, ctx=None) -> None:
     """Record what this step was trying to do and what it concluded, in plain English.
 
     Both strings are authored by the fleet, never quoted from vendor-supplied content. These
     two attributes are what make the binder's reasoning appendix readable, so they are set on
     every meaningful span rather than only the top-level ones.
+
+    They are also appended to the ledger when ``ctx`` is supplied, and that is not duplication.
+    The binder's section 7 is rendered from a review's reasoning, and a span exported to a
+    console — which is what local mode has — cannot be queried by anything. Cloud Trace can, but
+    a binder that only rendered in cloud would be a binder nobody could check while building it.
+    The trace is for watching the fleet; the ledger is for reconstructing a decision six months
+    later, and those are different jobs.
+
+    Never raises. A decision that could not be persisted is a thinner binder section, not a
+    failed review.
     """
     s.set_attribute("goal", goal)
     s.set_attribute("decision", decision)
+
+    review_id = getattr(ctx, "review_id", None)
+    if not review_id:
+        return
+
+    from datetime import UTC, datetime
+
+    from shared.clients import firestore_client
+
+    try:
+        firestore_client().collection(COLLECTION_DECISIONS).add(
+            {
+                "review_id": review_id,
+                "agent": getattr(ctx, "agent", "") or "",
+                "goal": goal,
+                "decision": decision,
+                "trace_id": getattr(ctx, "trace_id", "") or "",
+                "idem_key": getattr(ctx, "idem_key", None),
+                "at": datetime.now(UTC).isoformat(),
+            }
+        )
+    except Exception as exc:  # noqa: BLE001 — telemetry never blocks the work it measures
+        log.warning("could not persist a decision for review=%s: %s", review_id, exc)
 
 
 def record_policy_event(s, *, policy: str, outcome: str, detail: str) -> None:

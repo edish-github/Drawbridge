@@ -155,6 +155,7 @@ class FixtureResponder:
             "parse_reply": self._parse_reply,
             "extract_controls": self._extract,
             "cross_examine": self._cross_examine,
+            "classify_data_scope": self._classify,
             "risk_memo": self._memo,
         }.get(task)
 
@@ -251,6 +252,44 @@ class FixtureResponder:
                 claim_ref=question_id,
             )
         )
+
+    def _classify(self, prompt: str, schema):
+        """Classify the answers in the prompt, from the pack's declared data categories.
+
+        The pack names the answer that carries the re-tier and the category it reveals; every
+        other answer classifies as whatever the vendor's intake declared. Read from the fixture
+        rather than written here, so a fixture run and a live run disagree about the model's
+        judgement and about nothing else.
+        """
+        from agents.orchestrator.retier import (
+            DataCategory,
+            ScopeClassification,
+            _ClassifiedScope,
+        )
+
+        known = set(getattr(DataCategory, "__args__", ()))
+        answers = self.pack["answers"]
+        trigger = str(answers.get("retier_trigger_question", ""))
+        declared = [
+            c
+            for c in self.pack["profile"]["intake"].get("declared_data_categories", [])
+            if c in known
+        ]
+
+        out = []
+        for qid, entry in answers.get("answers", {}).items():
+            if not re.search(rf"^{re.escape(qid)}:", prompt, re.M):
+                continue
+            revealed = str(entry.get("reveals_category", "")) if qid == trigger else ""
+            out.append(
+                ScopeClassification(
+                    question_id=qid,
+                    categories=[revealed] if revealed else declared,
+                    system_access=str(entry.get("reveals_system_access", "none")),
+                    quote=entry["text"][:180],
+                )
+            )
+        return _ClassifiedScope(classifications=out)
 
     def _memo(self, prompt: str, schema) -> str:
         band = _between(prompt, "band ", "\n").strip() or "conditional"

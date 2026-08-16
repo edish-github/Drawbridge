@@ -103,12 +103,43 @@ def test_a_valid_token_verifies_once(review_id):
 
 
 @emulator_required
-def test_a_replayed_token_fails(review_id):
-    """Single use, recorded by jti."""
+def test_a_token_is_spent_the_first_time_it_verifies(review_id):
+    """Single use, recorded by jti. The spend is what retires the human decision."""
     token = write_approval(review_id)
 
     assert verify_approval_token(review_id, TARGET, token=token) is True
-    assert verify_approval_token(review_id, TARGET, token=token) is False
+    assert approvals.already_spent(approvals.jti_of(token)) is True
+
+
+@emulator_required
+def test_a_spent_token_cannot_be_carried_to_another_address(review_id):
+    """The replay that matters. Once contact with one address is authorised the fleet may
+    write to *that* address again, so a spent token is only dangerous if it can reach a
+    different recipient — and it cannot."""
+    token = write_approval(review_id)
+
+    assert verify_approval_token(review_id, TARGET, token=token) is True
+    assert verify_approval_token(review_id, "attacker@elsewhere.example", token=token) is False
+
+
+@emulator_required
+def test_first_contact_is_the_gate_and_later_messages_are_not(review_id):
+    """P1 gates G2 — *first* outbound contact. Once a named human has approved writing to an
+    address, the chases, the follow-up and the questions a re-tier adds are the same authorised
+    conversation. Re-approving each message would make the gate noise rather than a control."""
+    token = write_approval(review_id)
+
+    assert verify_approval_token(review_id, TARGET, token=token) is True
+    assert verify_approval_token(review_id, TARGET, token=None) is True
+
+
+@emulator_required
+def test_a_contact_address_that_changed_mid_review_is_unauthorised_again(review_id):
+    """The case the narrowness is for: a redirected vendor contact is a new decision."""
+    verify_approval_token(review_id, TARGET, token=write_approval(review_id))
+
+    assert approvals.contact_established(review_id, TARGET) is True
+    assert approvals.contact_established(review_id, "new-contact@vendor.example") is False
 
 
 @emulator_required

@@ -132,6 +132,43 @@ def already_spent(jti: str) -> bool:
         return True
 
 
+def contact_established(review_id: str, target: str) -> bool:
+    """Return whether a human has already authorised contact with ``target`` on this review.
+
+    P1 gates **first** contact, which is what the G2 human gate is. Once a named person has
+    approved writing to an address, the fleet may write to that address again on the same
+    review: the chase rounds, the targeted follow-up and the additional questions a re-tier
+    produces are all the same conversation, and asking a CISO to re-approve each message would
+    make the gate noise rather than a control.
+
+    The check is on the spend record rather than on a flag, so it is exactly as narrow as the
+    approval was: a **different** address on the same review has not been authorised by
+    anything and still needs its own token. That is the case the policy is actually protecting
+    against — a vendor contact that changed mid-review is the classic redirection.
+
+    Never raises. An unreadable spend record returns ``False``, which closes the gate rather
+    than opening it.
+    """
+    from google.cloud.firestore_v1 import FieldFilter
+
+    if not target:
+        return False
+
+    try:
+        spent = (
+            firestore_client()
+            .collection(COLLECTION_SPENT)
+            .where(filter=FieldFilter("review_id", "==", review_id))
+            .where(filter=FieldFilter("target", "==", target))
+            .limit(1)
+            .stream()
+        )
+        return any(True for _ in spent)
+    except Exception as exc:  # noqa: BLE001 — unreadable means not established, the safe way
+        log.warning("could not check prior contact for review=%s: %s", review_id, exc)
+        return False
+
+
 def spend(jti: str, *, review_id: str, target: str) -> bool:
     """Retire a token transactionally. Returns ``False`` if it was already spent.
 

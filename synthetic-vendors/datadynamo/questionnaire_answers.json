@@ -4,10 +4,115 @@
   "retier_trigger_question": "DP03",
   "retier_note": "The planning documents refer to this beat as the Q23 answer. DP03 is the bank id that carries it: the question asks which regions customer data is stored or processed in, and the answer names customer records in an EU environment, contradicting the declared scope of internal analytics only.",
   "reply_schedule": [
-    { "simulated_day": 2, "question_ids": ["AC01", "IR01", "CP01"] },
-    { "simulated_day": 6, "question_ids": ["DP01", "DP03", "CP03"] },
-    { "simulated_day": 9, "question_ids": ["AC02", "IR02", "CP04", "SP01"] },
-    { "simulated_day": 12, "question_ids": ["DP02", "AC03", "BC01"] }
+    {
+      "simulated_day": 2,
+      "question_ids": [
+        "AC01",
+        "IR01",
+        "CP01"
+      ]
+    },
+    {
+      "simulated_day": 6,
+      "question_ids": [
+        "DP01",
+        "DP03",
+        "CP03"
+      ]
+    },
+    {
+      "simulated_day": 9,
+      "question_ids": [
+        "AC02",
+        "IR02",
+        "CP04",
+        "SP01"
+      ]
+    },
+    {
+      "simulated_day": 12,
+      "question_ids": [
+        "DP02",
+        "AC03",
+        "BC01"
+      ]
+    },
+    {
+      "simulated_day": 15,
+      "question_ids": [
+        "DP04",
+        "DP05",
+        "DP06",
+        "DP07",
+        "AC04",
+        "AC05"
+      ]
+    },
+    {
+      "simulated_day": 18,
+      "question_ids": [
+        "DP08",
+        "DP09",
+        "DP10",
+        "AC06",
+        "AC07",
+        "AC08"
+      ]
+    },
+    {
+      "simulated_day": 21,
+      "question_ids": [
+        "DP11",
+        "DP12",
+        "AC09",
+        "IR03",
+        "IR04",
+        "IR05"
+      ]
+    },
+    {
+      "simulated_day": 24,
+      "question_ids": [
+        "IR06",
+        "IR07",
+        "IR08",
+        "IR09",
+        "CP02",
+        "CP05"
+      ]
+    },
+    {
+      "simulated_day": 27,
+      "question_ids": [
+        "CP06",
+        "CP07",
+        "CP08",
+        "CP09",
+        "SP02",
+        "SP03"
+      ]
+    },
+    {
+      "simulated_day": 30,
+      "question_ids": [
+        "SP04",
+        "SP05",
+        "SP06",
+        "SP07",
+        "SP08",
+        "SP09"
+      ]
+    },
+    {
+      "simulated_day": 33,
+      "question_ids": [
+        "BC02",
+        "BC03",
+        "BC04",
+        "BC05",
+        "BC06"
+      ]
+    }
   ],
   "answers": {
     "AC01": {
@@ -24,7 +129,9 @@
     },
     "CP01": {
       "text": "Our most recent SOC 2 Type II report is attached, covering 1 July 2024 to 30 June 2025. The auditor is Kestrel Assurance Partners and the opinion is qualified.",
-      "attachments": ["soc2-report.md"],
+      "attachments": [
+        "soc2-report.md"
+      ],
       "expected_confidence": 0.94
     },
     "DP01": {
@@ -37,11 +144,14 @@
       "text": "Shipment data is processed in our primary region. Customer records are processed in our EU environment for route optimisation and are retained there for 18 months.",
       "attachments": [],
       "expected_confidence": 0.88,
-      "note": "Re-tier trigger. Intake declared internal operational data with no customer data; this answer names customer records, so the tier moves from 2 to 1 and the additional domain's questions go out mid-flight."
+      "note": "Re-tier trigger. Intake declared internal operational data with no customer data; this answer names customer records, so the tier moves from 2 to 1 and the additional domain's questions go out mid-flight.",
+      "reveals_category": "customer_pii"
     },
     "CP03": {
       "text": "The report records one exception relating to access review timing, which has been addressed.",
-      "attachments": ["soc2-report.md"],
+      "attachments": [
+        "soc2-report.md"
+      ],
       "expected_confidence": 0.62,
       "note": "The report actually records two exceptions, one of which is unremediated."
     },
@@ -52,18 +162,24 @@
     },
     "IR02": {
       "text": "We had one security incident in the last 24 months, in March 2025, affecting a shipment metadata store. It was contained and disclosed to affected customers.",
-      "attachments": ["incident-history.md"],
+      "attachments": [
+        "incident-history.md"
+      ],
       "expected_confidence": 0.87
     },
     "CP04": {
       "text": "ISO/IEC 27001 certificate number ISO-27001-DD-2298, issued by Ravenscroft Certification Ltd. The certificate is attached.",
-      "attachments": ["iso-27001-certificate.md"],
+      "attachments": [
+        "iso-27001-certificate.md"
+      ],
       "expected_confidence": 0.9,
       "note": "The attached certificate expired on 14 March 2025. The vendor does not mention this. The deterministic expiry check catches it without a model call."
     },
     "SP01": {
       "text": "Our subprocessor list is attached. Four subprocessors, all within the EU.",
-      "attachments": ["subprocessor-list.md"],
+      "attachments": [
+        "subprocessor-list.md"
+      ],
       "expected_confidence": 0.89
     },
     "DP02": {
@@ -80,6 +196,212 @@
       "text": "RTO is 8 hours and RPO is 1 hour. Our last recovery test was in 2024.",
       "attachments": [],
       "expected_confidence": 0.72
+    },
+    "DP04": {
+      "text": "Tenant separation is logical. Every row in the routing store carries a tenant identifier and queries are scoped by it at the application layer. There is no separate database per customer. The platform design note is attached.",
+      "attachments": [],
+      "expected_confidence": 0.81
+    },
+    "DP05": {
+      "text": "We process customer personal data as a processor under Article 28, governed by our standard data processing agreement, which is attached. The lawful basis is the controller's, not ours.",
+      "attachments": [],
+      "expected_confidence": 0.86
+    },
+    "DP06": {
+      "text": "Export and deletion requests are handled by the support desk and completed within 30 days. Records of our three most recent requests are attached, all closed within 21 days.",
+      "attachments": [],
+      "expected_confidence": 0.84
+    },
+    "DP07": {
+      "text": "Keys are held in the cloud provider's managed key service. The platform team and two named SREs can administer them. Data keys rotate annually; the root key has not been rotated since the environment was built in 2022.",
+      "attachments": [],
+      "expected_confidence": 0.88
+    },
+    "DP08": {
+      "text": "Backups run nightly with a 35-day retention. They are encrypted at rest with the same managed keys and travel over TLS. The backup policy is attached.",
+      "attachments": [],
+      "expected_confidence": 0.83
+    },
+    "DP09": {
+      "text": "Customer records stay in the EU environment and are not transferred out of it. There is therefore no transfer mechanism to attach and no transfer impact assessment has been carried out.",
+      "attachments": [],
+      "expected_confidence": 0.79
+    },
+    "DP10": {
+      "text": "Our staging environment is loaded from a subset of production shipment records. Customer identifiers are replaced with sequential values; free-text address fields are carried over as they are.",
+      "attachments": [],
+      "expected_confidence": 0.85
+    },
+    "DP11": {
+      "text": "We operate a three-level classification — public, internal and confidential. Customer records are confidential. The handling requirements are set out in the information security policy, which is attached.",
+      "attachments": [],
+      "expected_confidence": 0.82
+    },
+    "DP12": {
+      "text": "Application logs are retained for 90 days and access logs for 12 months. Application logs include shipment addresses, which are customer personal data.",
+      "attachments": [],
+      "expected_confidence": 0.87
+    },
+    "AC04": {
+      "text": "Support engineers reach production customer data through a bastion host. Access is requested in our ticketing system and approved by a team lead. Sessions are logged. There is no automatic time limit on the grant.",
+      "attachments": [],
+      "expected_confidence": 0.83
+    },
+    "AC05": {
+      "text": "We support SAML 2.0 and OpenID Connect. SAML single sign-on is included in the enterprise tier; SCIM provisioning is a paid add-on.",
+      "attachments": [],
+      "expected_confidence": 0.9
+    },
+    "AC06": {
+      "text": "Four roles: viewer, dispatcher, administrator and billing. Administrators can scope a user to a set of depots, which is how a customer restricts visibility to a subset of their own data. The role matrix is attached.",
+      "attachments": [],
+      "expected_confidence": 0.88
+    },
+    "AC07": {
+      "text": "Access recertification runs twice a year and is owned by the Head of Platform. The two most recent completed recertifications are attached, dated March 2025 and September 2024.",
+      "attachments": [],
+      "expected_confidence": 0.86
+    },
+    "AC08": {
+      "text": "Minimum twelve characters, complexity enforced by the identity provider, no reuse of the last ten passwords, and rotation every 180 days. Enforced through policy in the identity provider rather than by a local check.",
+      "attachments": [],
+      "expected_confidence": 0.87
+    },
+    "AC09": {
+      "text": "API keys are issued per integration from the admin console and can be revoked there. They do not expire automatically. Internal service accounts use short-lived workload identity credentials that rotate hourly.",
+      "attachments": [],
+      "expected_confidence": 0.85
+    },
+    "IR03": {
+      "text": "Our last tabletop exercise was in November 2024 and covered a ransomware scenario against the routing store. Platform, support and the management team took part. It produced two actions, both closed.",
+      "attachments": [],
+      "expected_confidence": 0.84
+    },
+    "IR04": {
+      "text": "Alerts are generated by the cloud provider's security centre and by our own application error monitoring. They are reviewed by the platform team during European business hours. There is an on-call rota outside those hours for availability alerts only.",
+      "attachments": [],
+      "expected_confidence": 0.86
+    },
+    "IR05": {
+      "text": "Four severities. Sev 1 is a 15-minute response and hourly updates; Sev 2 is one hour; Sev 3 and 4 are next business day. The incident response plan recording them is attached.",
+      "attachments": [],
+      "expected_confidence": 0.85
+    },
+    "IR06": {
+      "text": "We identify affected customers by querying the routing store for records touched in the exposure window. In the March 2025 incident that determination took six days.",
+      "attachments": [],
+      "expected_confidence": 0.88
+    },
+    "IR07": {
+      "text": "We scan weekly with the cloud provider's vulnerability service. Critical findings are remediated within 14 days, high within 30, medium within 90. The most recent scan summary is attached.",
+      "attachments": [],
+      "expected_confidence": 0.86
+    },
+    "IR08": {
+      "text": "Our most recent penetration test was carried out in February 2025 by Halden Security and covered the customer-facing application and its API. The executive summary is attached.",
+      "attachments": [],
+      "expected_confidence": 0.89
+    },
+    "IR09": {
+      "text": "Cloud audit logs and snapshots of the affected systems are preserved for the duration of an investigation and retained for 12 months afterwards. Access is limited to the Head of Platform and external counsel.",
+      "attachments": [],
+      "expected_confidence": 0.82
+    },
+    "CP02": {
+      "text": "The report covers the routing platform and its EU production environment. Our reporting and analytics environment is outside the scope of the report.",
+      "attachments": [],
+      "expected_confidence": 0.87
+    },
+    "CP05": {
+      "text": "Our next surveillance assessment is scheduled for October 2026 and will cover the twelve months to June 2026. The scheduling confirmation from the certification body is attached.",
+      "attachments": [],
+      "expected_confidence": 0.83
+    },
+    "CP06": {
+      "text": "Information security is owned by our Head of Platform, who reports to the Managing Director. The security policy showing that ownership is attached.",
+      "attachments": [],
+      "expected_confidence": 0.85
+    },
+    "CP07": {
+      "text": "All staff complete security awareness training on joining and annually thereafter. The most recent cycle closed at 91% completion.",
+      "attachments": [],
+      "expected_confidence": 0.84
+    },
+    "CP08": {
+      "text": "Staff with access to customer data undergo identity and criminal record checks in Germany and Poland, and identity checks only in Spain, where our contract staff are engaged through an agency.",
+      "attachments": [],
+      "expected_confidence": 0.86
+    },
+    "CP09": {
+      "text": "We hold cyber liability cover of EUR 5 million per claim with an annual aggregate of EUR 5 million. The certificate of insurance is attached.",
+      "attachments": [],
+      "expected_confidence": 0.88
+    },
+    "SP02": {
+      "text": "New subprocessors are assessed by our Head of Platform against a questionnaire covering certification, breach history and data location. The most recent completed assessment is attached.",
+      "attachments": [],
+      "expected_confidence": 0.8
+    },
+    "SP03": {
+      "text": "Our data processing agreement gives 30 days' notice before a subprocessor is added or replaced. Customers may object in writing, and the remedy on an unresolved objection is termination without penalty. The relevant extract is attached.",
+      "attachments": [],
+      "expected_confidence": 0.87
+    },
+    "SP04": {
+      "text": "Our hosting provider and our managed database provider can technically reach customer data in plaintext. Both are limited by customer-managed encryption keys and by provider-side access approval controls.",
+      "attachments": [],
+      "expected_confidence": 0.84
+    },
+    "SP05": {
+      "text": "Subprocessor agreements flow down our security requirements, a 24-hour breach notification obligation and an annual audit right. A representative agreement is attached with commercial terms removed.",
+      "attachments": [],
+      "expected_confidence": 0.83
+    },
+    "SP06": {
+      "text": "We review each subprocessor annually against their current certification. A publicly reported breach or a change of ownership triggers an off-cycle review.",
+      "attachments": [],
+      "expected_confidence": 0.82
+    },
+    "SP07": {
+      "text": "Our managed database provider relies on the same hosting provider we use directly. We became aware of this from their published subprocessor page. We have not surveyed fourth parties beyond that.",
+      "attachments": [],
+      "expected_confidence": 0.81
+    },
+    "SP08": {
+      "text": "On removal we migrate the data, then request written confirmation of destruction from the subprocessor within 30 days. We have removed one subprocessor since 2022 and hold that confirmation.",
+      "attachments": [],
+      "expected_confidence": 0.82
+    },
+    "SP09": {
+      "text": "All four subprocessors are located within the EU, so no transfer mechanism is relied on for any of them.",
+      "attachments": [],
+      "expected_confidence": 0.86
+    },
+    "BC02": {
+      "text": "Our last full disaster recovery test was in June 2024 against the EU environment. The database restore met its objective; the routing service took eleven hours to return to full capacity against an eight-hour target. The report is attached.",
+      "attachments": [],
+      "expected_confidence": 0.87
+    },
+    "BC03": {
+      "text": "We commit to 99.5% monthly availability. We achieved 99.7%, 99.6%, 99.2% and 99.8% over the last four quarters. The quarterly availability reports are attached.",
+      "attachments": [],
+      "expected_confidence": 0.88
+    },
+    "BC04": {
+      "text": "The platform runs across two availability zones in one region behind a managed load balancer. The routing store has a synchronous replica in the second zone. The region itself is a single point of failure; there is no second-region standby.",
+      "attachments": [],
+      "expected_confidence": 0.87
+    },
+    "BC05": {
+      "text": "On cessation customers may export their shipment and routing data through the API for 90 days. There is no source code or data escrow arrangement in place.",
+      "attachments": [],
+      "expected_confidence": 0.83
+    },
+    "BC06": {
+      "text": "Backup restoration is tested quarterly. The results of the two most recent tests, in May and August 2025, are attached; both restored inside the one-hour target.",
+      "attachments": [],
+      "expected_confidence": 0.85
     }
-  }
+  },
+  "coverage_note": "The schedule answers 54 of the 54 questions a Tier 1 review asks of a non-AI vendor, three of them below the confidence threshold, so coverage reaches 94% and the automatic threshold fires without an analyst declaring the thread complete. DP01, AC02 and AC03 are the weak answers, and they are weak on purpose."
 }

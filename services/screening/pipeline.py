@@ -79,6 +79,7 @@ def on_evidence_uploaded(event: EventEnvelope, review: Review) -> None:
                 s,
                 goal=f"screen and promote {quarantine_ref}",
                 decision=f"failed closed: {type(exc).__name__}; nothing promoted",
+                ctx=ctx,
             )
             log.warning("failed closed on %s: %s", quarantine_ref, exc)
             raise
@@ -87,6 +88,7 @@ def on_evidence_uploaded(event: EventEnvelope, review: Review) -> None:
             s,
             goal=f"screen and promote {quarantine_ref}",
             decision=f"promoted under {result.summary()}",
+            ctx=ctx,
         )
         publish(
             TOPIC_EVIDENCE_SCREENED,

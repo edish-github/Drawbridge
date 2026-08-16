@@ -66,6 +66,29 @@ version, because a re-plan may need a second send under a new key while the old 
 recognisably done.
 """
 
+FIELD_SENT_QUESTIONS = "sent_questions"
+"""Where the question ids already delivered to the vendor are recorded.
+
+A re-tier sends the additional domain's questions and nothing the vendor has already answered
+or already been asked, so the send has to know what went out before. Recorded on the review
+rather than recomputed from the plan, because the plan changed and the record of what was sent
+must not.
+"""
+
+
+def send_step_for(plan_version: int) -> str:
+    """Return the checkpoint name for the send under a given plan version.
+
+    A checkpoint is a position in *a plan*. When a re-tier replaces the plan there is a new
+    position with the same name, and reusing the old checkpoint would skip the second send
+    entirely — the tier badge would change on screen and the vendor would never receive the
+    questions the change was for.
+
+    Plan v1 keeps the bare name so the first send reads the same as it always has, in the
+    ledger and in every test that asserts against it.
+    """
+    return SEND_STEP if plan_version <= 1 else f"{SEND_STEP}@plan_v{plan_version}"
+
 TOOLS: list = []
 
 agent = Agent(
@@ -136,6 +159,11 @@ def on_plan_ready(event: EventEnvelope, review: Review) -> None:
     Once a human has approved, the same path runs again and sends exactly once — the send is
     claimed under ``review_id:plan_vN:questionnaire_send:v1``, so a redelivery of this event, a
     restart, or a repeat of the whole flow all skip it.
+
+    A re-tier republishes this event under a new plan version, and the second send carries only
+    the questions the vendor has not already been asked. The plan version is in the key and in
+    the checkpoint name, so the new send is not mistaken for the old one; the record of what has
+    already gone out is what stops the vendor being asked anything twice.
     """
     from agents.orchestrator.agent import STEP_PLAN
     from agents.questionnaire.delivery import TOOL_SEND_EMAIL
@@ -158,46 +186,70 @@ def on_plan_ready(event: EventEnvelope, review: Review) -> None:
                 "approval to be scoped to"
             )
 
-        questions = select_questions(
+        plan_version = int(plan.get("plan_version") or review.plan_version)
+        delivered = already_delivered(review.review_id)
+
+        selected = select_questions(
             tier, domains, ctx, is_ai_vendor=bool(raw.get("is_ai_vendor"))
         )
-        body = render_questionnaire(questions, vendor_name=vendor_name)
-        subject = f"Security review — {vendor_name} (Tier {tier})"
+        questions = [q for q in selected if q.question_id not in delivered]
+
+        if not questions:
+            # A re-tier that adds no question the vendor has not already been asked. Nothing to
+            # send is not the same as a failed send, and emailing an empty questionnaire to
+            # prove the path ran would be worse than either.
+            record_decision(
+                s,
+                goal=f"send the tier {tier} questionnaire to {vendor_name}",
+                decision="no question in this plan is new to the vendor; nothing sent",
+                ctx=ctx,
+            )
+            return
+
+        body = render_questionnaire(
+            questions, vendor_name=vendor_name, additional=bool(delivered)
+        )
+        subject = (
+            f"Security review — {vendor_name} (Tier {tier})"
+            if not delivered
+            else f"Security review — {vendor_name} (Tier {tier}, additional questions)"
+        )
 
         # Output screening is deliberately not wired into this path yet. The local Model Armor
         # stub is untrustworthy by construction, so screening a fleet-authored body here would
         # park every local send before the gateway was ever reached — and the gateway refusal is
         # the behaviour this milestone exists to prove. It lands with the real service.
-        idem_key = key_for(review.review_id, review.plan_version, SEND_STEP_ID)
+        idem_key = key_for(review.review_id, plan_version, SEND_STEP_ID)
         send_ctx = ctx.for_step(idem_key)
         token = approvals.pending_token(review.review_id, "contact")
 
-        already_sent = SEND_STEP in completed_steps(review.review_id)
+        checkpoint_name = send_step_for(plan_version)
+        already_sent = checkpoint_name in completed_steps(review.review_id)
+        sent_ids = [q.question_id for q in questions]
+
+        def deliver():
+            result = call_tool(
+                TOOL_SEND_EMAIL,
+                send_ctx,
+                to=recipient,
+                subject=subject,
+                body=body,
+                review_id=review.review_id,
+                vendor=review.vendor_id,
+                approval_token=token,
+            )
+            record_delivered(review.review_id, sent_ids)
+            return result
 
         try:
-            step(
-                SEND_STEP,
-                send_ctx,
-                lambda: run_once(
-                    idem_key,
-                    send_ctx,
-                    call_tool,
-                    TOOL_SEND_EMAIL,
-                    send_ctx,
-                    to=recipient,
-                    subject=subject,
-                    body=body,
-                    review_id=review.review_id,
-                    vendor=review.vendor_id,
-                    approval_token=token,
-                ),
-            )
+            step(checkpoint_name, send_ctx, lambda: run_once(idem_key, send_ctx, deliver))
         except PolicyViolation as exc:
             park_at_contact_gate(review, reason=str(exc))
             record_decision(
                 s,
                 goal=f"send the tier {tier} questionnaire to {vendor_name}",
                 decision=f"refused by {exc.policy}; parked at the contact gate",
+                ctx=ctx,
             )
             return
 
@@ -211,13 +263,14 @@ def on_plan_ready(event: EventEnvelope, review: Review) -> None:
                 s,
                 goal=f"send the tier {tier} questionnaire to {vendor_name}",
                 decision="already delivered under this plan version; nothing sent",
+                ctx=ctx,
             )
             log.info(
-                "review=%s first contact already completed under plan v%d — nothing sent "
+                "review=%s contact already completed under plan v%d — nothing sent "
                 "(guarded by checkpoint %r and key %s)",
                 review.review_id,
-                review.plan_version,
-                SEND_STEP,
+                plan_version,
+                checkpoint_name,
                 idem_key,
             )
             return
@@ -226,13 +279,41 @@ def on_plan_ready(event: EventEnvelope, review: Review) -> None:
             s,
             goal=f"send the tier {tier} questionnaire to {vendor_name}",
             decision=f"delivered {len(questions)} questions to the vendor contact",
+            ctx=ctx,
         )
         log.info(
-            "review=%s questionnaire delivered: %d questions, tier %d",
+            "review=%s questionnaire delivered: %d question(s), tier %d, plan v%d%s",
             review.review_id,
             len(questions),
             tier,
+            plan_version,
+            " (additional)" if delivered else "",
         )
+
+
+def already_delivered(review_id: str) -> set[str]:
+    """Return the question ids this vendor has already been sent.
+
+    Read from the record of what went out rather than recomputed from the plan. A re-tier
+    replaces the plan, and the questions the vendor received under the previous one are a fact
+    about the correspondence that no later plan gets to revise.
+    """
+    snap = firestore_client().collection("reviews").document(review_id).get()
+    return set((snap.to_dict() or {}).get(FIELD_SENT_QUESTIONS, []))
+
+
+def record_delivered(review_id: str, question_ids: list[str]) -> None:
+    """Record which questions have now gone out. Written inside the guarded send.
+
+    Inside rather than after, so a delivery that happened is always recorded as having
+    happened: the alternative ordering loses the record on a crash between the send and the
+    write, and the next plan version would ask the vendor the same thirty questions again.
+    """
+    from google.cloud import firestore
+
+    firestore_client().collection("reviews").document(review_id).set(
+        {FIELD_SENT_QUESTIONS: firestore.ArrayUnion(question_ids)}, merge=True
+    )
 
 
 def on_reply_received(event: EventEnvelope, review: Review) -> None:
@@ -285,6 +366,7 @@ def on_reply_received(event: EventEnvelope, review: Review) -> None:
                 f"{sum(1 for a in answers if a.needs_human)} below threshold; "
                 f"coverage {reached:.0%}"
             ),
+            ctx=ctx,
         )
         log.info(
             "review=%s reply %s: %d answer(s), coverage now %.0f%%",

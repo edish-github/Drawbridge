@@ -155,17 +155,31 @@ def select_questions(
     return selected
 
 
-def render_questionnaire(questions: list[Question], *, vendor_name: str = "") -> str:
+def render_questionnaire(
+    questions: list[Question], *, vendor_name: str = "", additional: bool = False
+) -> str:
     """Render the selected questions into the outbound message body.
 
     The body is assembled from internal state, which is why it is screened through the
     output template before it leaves — nothing else checks that it does not carry internal
     notes, another vendor's details, or dossier content.
+
+    ``additional`` marks the set a re-tier produced. It says so to the vendor in a sentence,
+    because a second questionnaire arriving with no explanation reads as an administrative
+    error and gets ignored, and the questions in it are the ones that matter most.
     """
+    opening = (
+        "Your earlier answers indicate a broader data scope than this review was opened for, so"
+        " the questions below have been added. Nothing you have already answered is repeated."
+        if additional
+        else "Please answer each question below in full and attach the evidence named against it."
+    )
+
     lines = [
-        f"Security review questionnaire{f' — {vendor_name}' if vendor_name else ''}",
+        f"Security review questionnaire{f' — {vendor_name}' if vendor_name else ''}"
+        + (" (additional questions)" if additional else ""),
         "",
-        "Please answer each question below in full and attach the evidence named against it.",
+        opening,
         "Answers that do not name specific standards, systems, scopes or documents will come",
         "back to you as a follow-up.",
         "",

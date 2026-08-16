@@ -77,6 +77,37 @@ def step(name: str, ctx, fn: Callable[[], Any]) -> Any:
     return result
 
 
+def recheckpoint(name: str, ctx, result: Any) -> Any:
+    """Replace the recorded result of a completed step. The one legitimate overwrite.
+
+    A re-tier re-plans a review mid-flight, and the plan is a checkpointed step. Leaving the
+    old result in place would mean the questionnaire, the coverage threshold and the score were
+    all still reading a plan the fleet had already replaced — the tier badge would change on
+    screen and nothing else would.
+
+    This is deliberately not ``step`` with a force flag. ``step`` means *run this once*, and a
+    parameter that made it mean something else would put the corner case in the resume path
+    rather than in the caller that needs it. Overwriting is a different operation and it says
+    so at the call site.
+
+    The superseded result is not lost: the tier change that caused the re-plan is written to the
+    ledger with the reason and the answer behind it, and that is what the binder's timeline
+    prints.
+
+    Raises:
+        TypeError: when the result cannot be serialised into the ledger.
+    """
+    firestore_client().collection(COLLECTION_REVIEWS).document(ctx.review_id).set(
+        {
+            "completed_steps": firestore.ArrayUnion([name]),
+            "step_results": {name: _serialise(result)},
+        },
+        merge=True,
+    )
+    log.info("checkpoint REPLACED %s for review=%s", name, ctx.review_id)
+    return result
+
+
 def completed_steps(review_id: str) -> list[str]:
     """Return the ordered step names already completed for this review."""
     snap = firestore_client().collection(COLLECTION_REVIEWS).document(review_id).get()

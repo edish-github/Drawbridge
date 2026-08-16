@@ -181,6 +181,7 @@ def on_findings_ready(event: EventEnvelope, review: Review) -> None:
             s,
             goal=f"score {vendor.get('name', review.vendor_id)} from {len(findings)} finding(s)",
             decision=f"Trust Score {result.score}, band {result.band}",
+            ctx=ctx,
         )
 
         publish(

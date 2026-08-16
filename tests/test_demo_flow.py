@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import pytest
 
-from scenarios.demo_runner import BEATS, BeatMissing, run
+from scenarios.demo_runner import BeatMissing, beats_for, run
 from scenarios.fixtures import responding_from
 from shared.clients import firestore_client
+from shared.domain import Review
 from tests.conftest import emulator_required, pubsub_required
 
 
@@ -30,7 +31,7 @@ def datadynamo_run():
 @pubsub_required
 def test_every_beat_fires(datadynamo_run):
     """A beat that does not fire is a failure rather than a variation."""
-    assert datadynamo_run == list(BEATS)
+    assert datadynamo_run == beats_for("datadynamo")
 
 
 @emulator_required
@@ -45,9 +46,32 @@ def test_the_review_ends_decided_with_a_score(datadynamo_run):
 
 @emulator_required
 @pubsub_required
-def test_the_vendor_was_emailed_exactly_once(datadynamo_run):
-    """Across a run that publishes every event the real system publishes."""
-    assert _count("inbox", _latest_review()["review_id"]) == 1
+def test_the_vendor_was_emailed_once_per_plan_version_and_never_twice_for_a_question():
+    """DataDynamo re-tiers, so it gets two messages: the Tier 2 set, then the questions the
+    re-tier added. Two is the right number and it is the arithmetic that proves it — the second
+    message is the difference between the sets, so no question is asked twice and none is
+    dropped."""
+    review = _latest_review()
+    sent = _inbox(review["review_id"])
+    asked = [line for message in sent for line in _question_ids(message["body"])]
+
+    assert len(sent) == review["plan_version"] == 2
+    assert len(asked) == len(set(asked)), "a question was asked twice across the re-plan"
+    assert set(asked) == set(review["sent_questions"])
+
+
+@emulator_required
+@pubsub_required
+def test_the_review_retiers_on_the_vendors_own_answer(datadynamo_run):
+    """The beat where the fleet overrules the person who wants the contract signed. The intake
+    form declared internal analytics; DP03 names customer records, and the tier moves."""
+    review = _latest_review()
+    change = review["tier_history"][-1]
+
+    assert review["tier"] == 1 and review["plan_version"] == 2
+    assert change["from_tier"] == 2 and change["to_tier"] == 1
+    assert change["source_ref"] == "DP03"
+    assert "customer records" in change["reason"].lower()
 
 
 @emulator_required
@@ -86,10 +110,12 @@ def test_the_expired_certificate_is_a_rule_finding(datadynamo_run):
 @pubsub_required
 def test_every_finding_reaches_the_score(datadynamo_run):
     """A finding the rubric cannot map would be a silently wrong number."""
+    from agents.risk_scorer.agent import scored_domains as domains_of
     from agents.risk_scorer.scoring import load_rubric
 
     review = _latest_review()
-    scored_domains = set(load_rubric().weights_for_tier(review["tier"]))
+    loaded = Review.model_validate(review)
+    scored_domains = set(load_rubric().weights_for(domains_of(loaded) or []))
 
     for finding in _findings(review["review_id"]):
         assert finding["domain"] in scored_domains | {"conduct"}
@@ -120,8 +146,9 @@ def test_a_replay_produces_the_same_score_and_the_same_findings(datadynamo_run):
     second = _latest_review()
     assert second["review_id"] != first["review_id"], "the replay must be a distinct review"
     assert second["score"] == first["score"]
+    assert second["tier"] == first["tier"], "the replay must re-tier the same way"
     assert _signature(second["review_id"]) == first_findings
-    assert _count("inbox", second["review_id"]) == 1
+    assert _count("inbox", second["review_id"]) == _count("inbox", first["review_id"])
 
 
 @emulator_required
@@ -167,6 +194,24 @@ def _findings(review_id: str) -> list[dict]:
         .where(filter=FieldFilter("review_id", "==", review_id))
         .stream()
     ]
+
+
+def _inbox(review_id: str) -> list[dict]:
+    from google.cloud.firestore_v1 import FieldFilter
+
+    return [
+        d.to_dict()
+        for d in firestore_client()
+        .collection("inbox")
+        .where(filter=FieldFilter("review_id", "==", review_id))
+        .stream()
+    ]
+
+
+def _question_ids(body: str) -> list[str]:
+    import re
+
+    return re.findall(r"^\s{2}([A-Z]{2}\d{2})\.", body, re.M)
 
 
 def _signature(review_id: str) -> set[tuple]:

@@ -68,7 +68,9 @@
       "domain": "business_continuity",
       "severity": "medium",
       "contradiction": false,
-      "source": "model"
+      "source": "model",
+      "claim_ref": "BC01",
+      "note": "The answer states an RTO of 8 hours and a last recovery test 'in 2024'. The DR test report records eleven hours against an eight-hour target, so the objective was not met and the evidence is older than the annual cycle the tier implies. A gap, not a contradiction: nothing in the evidence refutes the stated objective, it simply was not achieved."
     }
   ],
   "followups": {

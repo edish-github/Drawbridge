@@ -47,19 +47,40 @@ BEATS = (
     "contact_gate_released",
     "questionnaire_sent",
     "replies_parsed",
+    "retier",
+    "additional_questions_sent",
     "evidence_screened",
     "findings_ready",
     "scored",
     "decision_gate_parked",
     "decided",
+    "binder_rendered",
 )
 """The ordered beats a full run produces. The demo script is timed against this list, and a
 beat that does not fire is a failure rather than a variation.
 
-``retier``, ``injection_blocked`` and ``binder_exported`` are absent from this list rather than
-silently unfired: re-tiering, the screening interception and the binder are not built yet, and
-listing a beat that cannot happen would make every run fail for the same known reason.
+``injection_blocked`` is absent rather than silently unfired: the screening interception needs
+the real Model Armor service, and listing a beat that cannot happen would make every run fail
+for the same known reason.
+
+The two re-tier beats are conditional on the vendor, which is why ``beats_for`` exists rather
+than this tuple being compared directly. A vendor whose intake form was accurate has nothing
+for the re-tier path to correct, and requiring the beat of them would be requiring the fleet to
+find a problem that is not there.
 """
+
+
+def beats_for(vendor: str) -> list[str]:
+    """Return the beats this vendor's run must produce, in order.
+
+    Read from the pack's own expectations rather than hard-coded per vendor: the fixture
+    declares whether a re-tier is expected, and a demo runner that disagreed with the fixture
+    would be asserting against its own opinion.
+    """
+    expected = load_vendor(vendor).get("expected", {})
+    retiers = bool((expected.get("tier") or {}).get("retier_expected"))
+    skip = set() if retiers else {"retier", "additional_questions_sent"}
+    return [beat for beat in BEATS if beat not in skip]
 
 
 class BeatMissing(Exception):
@@ -178,17 +199,32 @@ def _run(vendor: str) -> list[str]:
     demo.require("questionnaire_sent", inbox_count(demo.review_id) == 1)
 
     # --- replies --------------------------------------------------------------------------
+    opening_tier = demo.review().tier
+    retiered = False
+
     for message_id, body in replies_for(vendor):
         seed_reply(demo.review_id, body, message_id)
         demo.drain(batches=2)
+
+        if not retiered and demo.review().tier < opening_tier:
+            retiered = True
+            demo.beat("retier")
+            # The re-tier put the review back in QUESTIONNAIRE_OUT and republished the plan; the
+            # drain above already delivered the additional set. Asserting the count rather than
+            # the send is what makes "and nothing twice" checkable.
+            demo.require("additional_questions_sent", inbox_count(demo.review_id) == 2)
+
     demo.require("replies_parsed", answered_count(demo.review_id) > 0)
 
-    # The scripted schedule is exhausted. An analyst deciding to proceed with what the vendor
-    # actually sent is an ordinary step, and it is the one the fixtures need: the pack answers
-    # 13 of the 30 questions a Tier 2 review asks, so the automatic threshold never fires.
-    mark_replies_complete(demo.review_id)
-    seed_reply(demo.review_id, "(no further answers)", f"{vendor}-final")
-    demo.drain(batches=2)
+    # The scripted schedule is exhausted. If it answered enough, the coverage threshold has
+    # already opened evidence review on its own; if it did not, an analyst proceeding with what
+    # the vendor actually sent is an ordinary workflow step and this is where it happens. Both
+    # paths are real, and which one runs is a property of the pack rather than of the runner.
+    if demo.review().state is not ReviewState.EVIDENCE_REVIEW:
+        log.info("coverage did not reach the threshold; proceeding as an analyst would")
+        mark_replies_complete(demo.review_id)
+        seed_reply(demo.review_id, "(no further answers)", f"{vendor}-final")
+        demo.drain(batches=2)
 
     # --- evidence -------------------------------------------------------------------------
     seed_clean_evidence(demo.review_id, vendor)

@@ -219,6 +219,11 @@ def verify_approval_token(
     again, whereas the other direction means a token that survives a partial failure and can be
     presented twice.
 
+    Contact already authorised on this review passes without a second token. The gate is G2 —
+    *first* outbound contact — and re-approving every chase and follow-up would turn a control
+    into noise. The permission is as narrow as the approval that granted it: it is keyed on the
+    address, so a recipient that changed mid-review is unauthorised again.
+
     Returns:
         ``False`` for an absent, expired, replayed, mis-scoped or unverifiable token. It never
         raises on a bad token — a bad token is a policy outcome, not an error — so the caller's
@@ -231,6 +236,16 @@ def verify_approval_token(
     """
     from shared import approvals
     from shared.config import settings
+
+    # P1 gates first contact. A later message to an address a named human already approved on
+    # this review is the same authorised conversation — a chase, a follow-up, or the questions a
+    # re-tier added. A different address still needs its own approval, which is the case the
+    # policy is actually protecting against: a vendor contact that changed mid-review.
+    if scope == "contact" and settings().is_local and approvals.contact_established(
+        review_id, target
+    ):
+        log.info("P1 ACCEPTED · contact with %s already authorised on review=%s", target, review_id)
+        return True
 
     if not token:
         return False

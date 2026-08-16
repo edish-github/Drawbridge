@@ -190,6 +190,7 @@ def on_evidence_screened(event: EventEnvelope, review: Review) -> None:
                 f"{len(findings)} finding(s), {contradictions} contradiction(s), "
                 f"{sum(1 for f in findings if f.source == 'rule')} of them arithmetic"
             ),
+            ctx=ctx,
         )
 
         publish(
