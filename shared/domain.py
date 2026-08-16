@@ -217,6 +217,25 @@ class ReviewPlan(BaseModel):
     needs_human: bool = False
 
 
+RubricDomain = Literal[
+    "data_protection",
+    "access_control",
+    "incident_response",
+    "compliance_posture",
+    "business_continuity",
+    "subprocessors",
+    "ai_specific",
+    "conduct",
+]
+"""The rubric domain keys, as a type the schema can enforce.
+
+Measured behaviour, not a precaution: asked for a domain as a free string, the model returned
+``"Access Control"`` — title case, spaced. ``compute_score`` looks the domain up in the rubric
+and raises on a miss, so every finding would have failed scoring at the last step. Constraining
+the schema makes the model emit the key the arithmetic expects.
+"""
+
+
 class FindingDraft(BaseModel):
     """A finding as the Evidence agent emits it, before persistence.
 
@@ -224,7 +243,7 @@ class FindingDraft(BaseModel):
     model cannot label its own judgement as a rule.
     """
 
-    domain: str
+    domain: RubricDomain
     severity: Severity
     contradiction: bool
     summary: str

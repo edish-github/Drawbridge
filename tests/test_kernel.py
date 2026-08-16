@@ -399,3 +399,42 @@ def test_a_conduct_flag_surfaces_on_the_dossier(review_id):
                           value={"value": "adversarial_conduct", "review_id": review_id}))
 
     assert recall_dossier(vendor).adversarial_flag is True
+
+
+# --- Model output schemas -------------------------------------------------------------------
+
+
+def test_a_finding_draft_must_use_a_rubric_domain_key():
+    """Measured, not hypothetical: asked for a free string the model returned "Access Control",
+    which compute_score would have raised on at the last step of every review.
+    """
+    from shared.domain import FindingDraft
+
+    with pytest.raises(ValidationError):
+        FindingDraft(
+            domain="Access Control",
+            severity="high",
+            contradiction=True,
+            summary="x",
+        )
+
+    assert FindingDraft(
+        domain="access_control", severity="high", contradiction=True, summary="x"
+    ).domain == "access_control"
+
+
+def test_a_finding_draft_cannot_claim_its_own_provenance():
+    """The model has no field in which to label its judgement as a rule."""
+    from shared.domain import Finding, FindingDraft
+
+    assert "source" not in FindingDraft.model_fields
+    assert "source" in Finding.model_fields
+
+
+def test_the_rubric_domain_type_matches_the_domain_tuple():
+    """Two lists that must never drift; the schema and the rubric are read by different code."""
+    import typing
+
+    from shared.domain import RUBRIC_DOMAINS, RubricDomain
+
+    assert set(typing.get_args(RubricDomain)) == set(RUBRIC_DOMAINS)

@@ -169,10 +169,19 @@ def generate(
 
         usage = response.usage_metadata
         prompt_tokens = getattr(usage, "prompt_token_count", 0) or 0
-        completion_tokens = getattr(usage, "candidates_token_count", 0) or 0
+        answer_tokens = getattr(usage, "candidates_token_count", 0) or 0
+        # Thinking tokens are billed at the output rate and are not included in
+        # candidates_token_count. On short prompts they dominate: a one-word answer measured
+        # 8 in, 1 out and 105 thinking. Omitting them understates the per-review figure by an
+        # order of magnitude, and that figure is said out loud on camera.
+        thinking_tokens = getattr(usage, "thoughts_token_count", 0) or 0
+        completion_tokens = answer_tokens + thinking_tokens
+
         cost = estimate_cost(rate_key, prompt_tokens, completion_tokens)
 
         s.set_attribute("tokens.prompt", prompt_tokens)
+        s.set_attribute("tokens.answer", answer_tokens)
+        s.set_attribute("tokens.thinking", thinking_tokens)
         s.set_attribute("tokens.completion", completion_tokens)
         s.set_attribute("cost_usd", cost)
 

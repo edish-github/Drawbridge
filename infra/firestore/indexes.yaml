@@ -10,10 +10,11 @@
 
 version: 1
 
-# text-embedding-005 output dimensionality.
-# TODO(verify): confirm against the live model before creating the index — the dimension is
-# fixed at index creation and changing it means dropping and rebuilding.
-embedding_dimension: 768
+# gemini-embedding-001 output dimensionality, measured against the live API on 16 Aug 2026.
+# Fixed at index creation: changing it means dropping and rebuilding the index.
+# Note this is 3072, not the 768 the planning documents assumed — text-embedding-005 does not
+# exist on this API surface.
+embedding_dimension: 3072
 
 indexes:
   - collection_group: evidence_chunks
@@ -26,7 +27,7 @@ indexes:
         order: ascending
       - field_path: embedding
         vector_config:
-          dimension: 768
+          dimension: 3072
           flat: true
 
   - collection_group: findings

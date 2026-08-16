@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -124,7 +125,24 @@ def check_severity_stability() -> bool:
         ctx = SimpleNamespace(
             review_id="verify-severity", agent="evidence", trace_id=f"sev{i}"
         )
-        result = generate("cross_examine", prompt, ctx, response_schema=list[FindingDraft])
+        # Retry transient capacity errors only. A 503 is the service being busy and says
+        # nothing about severity stability; retrying it keeps the measurement about the prompt.
+        for attempt in range(4):
+            try:
+                result = generate(
+                    "cross_examine", prompt, ctx, response_schema=list[FindingDraft]
+                )
+                break
+            except Exception as exc:  # noqa: BLE001
+                if "503" not in str(exc) and "UNAVAILABLE" not in str(exc):
+                    raise
+                wait = 5 * (attempt + 1)
+                print(f"   run {i}: transient {type(exc).__name__}, retrying in {wait}s")
+                time.sleep(wait)
+        else:
+            print(f"run {i}: gave up after repeated transient errors")
+            return False
+
         findings = result.parsed or []
         if hasattr(findings, "__iter__") and findings and hasattr(findings[0], "model_dump"):
             findings = [f.model_dump() for f in findings]

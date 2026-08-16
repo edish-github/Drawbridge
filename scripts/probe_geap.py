@@ -313,9 +313,9 @@ def main() -> int:
     parser.add_argument("--project", default=os.environ.get("PROJECT_ID"))
     parser.add_argument("--region", default=os.environ.get("REGION", "us-central1"))
     parser.add_argument("--model-fast", default=os.environ.get("MODEL_FAST", "gemini-3.5-flash"))
-    parser.add_argument("--model-deep", default=os.environ.get("MODEL_DEEP", "gemini-pro"))
+    parser.add_argument("--model-deep", default=os.environ.get("MODEL_DEEP", "gemini-3.7-flash"))
     parser.add_argument(
-        "--model-embed", default=os.environ.get("MODEL_EMBED", "text-embedding-005")
+        "--model-embed", default=os.environ.get("MODEL_EMBED", "gemini-embedding-001")
     )
     parser.add_argument("--out", default=REPORT_PATH)
     args = parser.parse_args()

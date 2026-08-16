@@ -26,8 +26,9 @@ is where history lives.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any, Callable
+from typing import Any
 
 from google.cloud import firestore
 
