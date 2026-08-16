@@ -123,13 +123,13 @@ tr:last-child td { border-bottom: 0; }
 .pill-contradiction { color: var(--danger); border-color: var(--danger); }
 .pill-untrusted { color: var(--danger); border-color: var(--danger); }
 .pill-clean { color: var(--ok); border-color: var(--ok); }
-/* A retrieved passage is a whole chunk, which is right for an auditor and wrong for a screen:
-   four findings each quoting two thousand characters reads as a document dump. Capped and
-   scrollable here, printed in full below, so the same markup serves both readings. */
+/* A retrieved passage is a whole chunk, printed in full: an auditor checking a citation needs
+   the passage the model actually read, and a truncated quotation is a citation that cannot be
+   checked. What makes that readable is the chunker capping a chunk at CHUNK_TOKENS and
+   starting it at a section heading, not anything done here. */
 .passage {
   margin: 8px 0 0; padding: 10px 12px; border-left: 3px solid var(--line);
   background: var(--shell); color: var(--mute); font-size: 12px; white-space: pre-wrap;
-  max-height: 16em; overflow-y: auto;
 }
 .provenance { margin-top: 6px; color: var(--faint); }
 .arithmetic {
@@ -158,7 +158,6 @@ footer { color: var(--faint); font-size: 11.5px; padding: 6px 0 28px; text-align
   .cover { break-after: page; page-break-after: always; }
   h2 { border-bottom: 1pt solid #000; }
   .passage, .arithmetic, .rendered-by { background: #fff; border-color: #999; }
-  .passage { max-height: none; overflow: visible; }
   tr { break-inside: avoid; page-break-inside: avoid; }
   footer { display: none; }
 }

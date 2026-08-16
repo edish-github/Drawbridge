@@ -637,30 +637,83 @@ def index_chunks(clean_ref: str, review_id: str) -> int:
     return written
 
 
+_HEADING = re.compile(r"^#{1,6}\s")
+
+
 def chunk_text(text: str, chunk_tokens: int) -> list[str]:
-    """Split text into chunks of roughly ``chunk_tokens``, breaking on paragraphs.
+    """Split text into chunks of at most ``chunk_tokens``, breaking on paragraphs.
 
     Paragraph boundaries rather than a fixed character stride, so a retrieved passage is a
     passage rather than a sentence cut in half — a chunk that ends mid-claim reads as a gap to
     the cross-examination prompt.
+
+    Two refinements on top of that, and both are retrieval quality rather than tidiness:
+
+    A heading never ends a chunk. ``### Exception 3.2 — Multi-factor authentication coverage``
+    is its own paragraph, so a naive split strands it at the tail of the preceding chunk and
+    starts the next one mid-finding. The heading is the most searchable line in the section and
+    it belongs with the text it names, so any run of trailing headings moves into the new chunk
+    instead of closing the old one.
+
+    The budget is a cap rather than a target. A single paragraph longer than the budget used to
+    become an oversized chunk of its own, which is how a "400-token" setting quietly produces a
+    passage nobody wants to read in the binder; one that long is split on sentence boundaries.
     """
     budget = max(1, chunk_tokens) * CHARS_PER_TOKEN
     chunks: list[str] = []
     current: list[str] = []
     size = 0
 
-    for paragraph in (p.strip() for p in re.split(r"\n\s*\n", text)):
-        if not paragraph:
-            continue
+    for paragraph in _paragraphs(text, budget):
         if current and size + len(paragraph) > budget:
-            chunks.append("\n\n".join(current))
-            current, size = [], 0
+            carried = _trailing_headings(current)
+            body = current[: len(current) - len(carried)]
+            if body:
+                chunks.append("\n\n".join(body))
+            current = carried
+            size = sum(len(p) for p in carried)
         current.append(paragraph)
         size += len(paragraph)
 
     if current:
         chunks.append("\n\n".join(current))
     return chunks
+
+
+def _paragraphs(text: str, budget: int):
+    """Yield the document's paragraphs, splitting any that exceed the budget on their own."""
+    for raw in re.split(r"\n\s*\n", text):
+        paragraph = raw.strip()
+        if not paragraph:
+            continue
+        if len(paragraph) <= budget:
+            yield paragraph
+        else:
+            yield from _split_sentences(paragraph, budget)
+
+
+def _split_sentences(paragraph: str, budget: int) -> list[str]:
+    """Break one over-long paragraph at sentence boundaries."""
+    parts: list[str] = []
+    current = ""
+    for sentence in re.split(r"(?<=[.!?])\s+", paragraph):
+        if current and len(current) + len(sentence) + 1 > budget:
+            parts.append(current)
+            current = ""
+        current = f"{current} {sentence}".strip()
+    if current:
+        parts.append(current)
+    return parts
+
+
+def _trailing_headings(block: list[str]) -> list[str]:
+    """Return the run of headings at the end of a chunk, which belong to the next one."""
+    carried: list[str] = []
+    for paragraph in reversed(block):
+        if not _HEADING.match(paragraph):
+            break
+        carried.insert(0, paragraph)
+    return carried
 
 
 # --- Storage seams -------------------------------------------------------------------------

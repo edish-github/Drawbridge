@@ -105,6 +105,49 @@ def test_a_claim_the_evidence_supports_produces_no_contradiction(datadynamo):
     assert finding is None or finding.contradiction is False
 
 
+# --- Chunking is a retrieval control, not a formatting one ---------------------------------------
+
+
+def test_no_chunk_exceeds_the_configured_budget():
+    """A chunk over the cap is a passage nobody reads in the binder and a diluted vector in the
+    index. The setting is a cap, so a single long paragraph is split rather than let through."""
+    from shared.armor import CHARS_PER_TOKEN, chunk_text
+
+    budget = 400 * CHARS_PER_TOKEN
+    document = "\n\n".join(f"Paragraph {n}. " + "word " * 200 for n in range(6))
+
+    assert all(len(chunk) <= budget for chunk in chunk_text(document, 400))
+
+
+def test_a_heading_never_ends_a_chunk():
+    """``### Exception 3.2 — Multi-factor authentication coverage`` is the most searchable line
+    in the section it names. Stranded at the tail of the previous chunk it retrieves the wrong
+    passage and starts the finding's citation mid-sentence."""
+    from shared.armor import chunk_text
+
+    document = "\n\n".join(
+        ["## Section one", "x" * 1400, "### Exception 3.2 — MFA coverage", "y" * 400]
+    )
+
+    chunks = chunk_text(document, 400)
+
+    assert len(chunks) > 1
+    assert not chunks[0].rstrip().endswith("MFA coverage")
+    assert chunks[1].startswith("### Exception 3.2")
+
+
+@emulator_required
+def test_the_cited_passage_starts_where_a_reader_would_start(datadynamo):
+    """Binder section 4 prints the cited chunk in full. It reads as a section of the report
+    rather than as the tail of one and the head of another because of where it starts."""
+    with responding_from("datadynamo"):
+        finding = reconcile_claim(ctx(datadynamo), datadynamo, CLAIM_AC01)
+
+    text = resolve_chunk(finding.evidence_ref).text
+
+    assert text.lstrip().startswith("#"), text[:80]
+
+
 # --- Provenance cannot be claimed by the model --------------------------------------------------
 
 
