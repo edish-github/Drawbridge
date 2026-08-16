@@ -23,3 +23,5 @@ out/
 *.tfstate
 *.tfstate.backup
 infra/CAPABILITY-REPORT.md
+.emulators/
+.local-storage/

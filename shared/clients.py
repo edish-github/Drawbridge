@@ -70,6 +70,26 @@ def subscriber_client():
 
 
 @lru_cache(maxsize=1)
+def storage_client():
+    """Return the Cloud Storage client.
+
+    Cloud mode only. There is no Storage emulator, so local mode is served by the filesystem
+    backend in ``shared.storage`` and never reaches this function; calling it locally raises
+    rather than quietly building a client that would talk to the real API.
+    """
+    cfg = settings()
+    if cfg.is_local:
+        raise RuntimeError(
+            "local mode has no Cloud Storage backend — shared.storage writes to the "
+            "filesystem. Reaching this function locally means a caller bypassed it."
+        )
+
+    from google.cloud import storage
+
+    return storage.Client(project=cfg.project_id)
+
+
+@lru_cache(maxsize=1)
 def genai_client() -> Any:
     """Return the generative model client for this mode.
 
@@ -103,4 +123,5 @@ def reset_client_cache() -> None:
     firestore_client.cache_clear()
     publisher_client.cache_clear()
     subscriber_client.cache_clear()
+    storage_client.cache_clear()
     genai_client.cache_clear()
