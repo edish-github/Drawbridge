@@ -13,7 +13,10 @@ a generative model, which is a different trust category.
 
 ``index_chunks`` runs after the clean-stamp, never before. Only stamped content is chunked,
 embedded and indexed, or retrieval becomes a way to smuggle unscreened text into a model one
-passage at a time.
+passage at a time. It lives here because that ordering constraint is a kernel property and it
+enforces it directly — a reference outside the clean bucket is refused — but it is *called* by
+the Evidence agent rather than by the promotion path, because embedding is a model call and the
+screening identity holds no role that can make one.
 
 **Local mode uses a stub, and the stub is labelled everywhere it could be mistaken for real.**
 It logs a warning on every call, sets ``template`` to ``local-stub``, and reports its critical
@@ -45,6 +48,7 @@ import hashlib
 import logging
 import re
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -310,7 +314,8 @@ def screen_and_promote(quarantine_ref: str, review_id: str) -> ScreenResult:
     """Screen a quarantined upload and promote it to the clean bucket if it earns a stamp.
 
     Order: read raw bytes, extract text locally, screen the real text, record the screening,
-    scrub guided by the SDP hits, write the stamped object, index its chunks, publish.
+    scrub guided by the SDP hits, write the stamped object, publish. Indexing follows on the
+    Evidence agent's side of the identity boundary.
 
     Raises:
         ArmorUnavailable, ArmorSkipped: nothing is promoted; the object stays in quarantine and
@@ -326,8 +331,13 @@ def screen_and_promote(quarantine_ref: str, review_id: str) -> ScreenResult:
     scrubbed = scrub_pii(text, result)
     body = strip_payload(scrubbed, result) if result.threat_found() else scrubbed
 
-    clean_ref = write_clean_object(quarantine_ref, body, result, review_id)
-    index_chunks(clean_ref, review_id)
+    # Promotion ends here. Chunking and embedding are *not* called from this function, because
+    # embedding is a model call and the screening identity holds no Vertex AI role — it is the
+    # one component in the fleet that is structurally incapable of prompting anything, and
+    # calling index_chunks here would quietly make the published permission matrix false. The
+    # Evidence agent runs it on evidence.screened; the ordering constraint it enforces lives in
+    # index_chunks itself, which refuses any reference outside the clean bucket.
+    write_clean_object(quarantine_ref, body, result, review_id)
     return result
 
 
@@ -458,20 +468,106 @@ def sign_stamp(claim: dict) -> str:
     return f"local-tag:{digest}:{payload}"
 
 
+CHUNK_COLLECTION = "evidence_chunks"
+CHARS_PER_TOKEN = 4
+"""Characters per token, for sizing chunks without tokenising.
+
+An approximation, and deliberately a cheap one: chunk size trades retrieval precision against
+call count, and a tokeniser round-trip per document would cost more than the imprecision does.
+"""
+
+
 def index_chunks(clean_ref: str, review_id: str) -> int:
     """Chunk, embed and index a stamped document. Returns the number of chunks written.
 
-    Only ever called after the clean-stamp exists.
+    Only ever called after the clean-stamp exists, and it enforces that rather than assuming
+    it: a reference outside the clean bucket is refused. Retrieval reading unstamped content
+    would be a way to smuggle unscreened text into a model one passage at a time, which is
+    exactly the shape of the attack the screening boundary exists to stop.
+
+    In local mode the chunks and their embeddings are written to Firestore with no vector
+    index; similarity search over a single review's chunks is small enough to run brute force.
+    The KNN index is a cloud-mode concern, declared in ``infra/firestore/indexes.yaml`` at
+    **3072** dimensions to match ``gemini-embedding-001``, not the 768 the planning documents
+    assumed.
 
     Raises:
         Nothing on an embedding or index failure: retrieval is an optional control. It logs a
         degraded-mode warning and returns 0, and cross-examination falls back to whole-document
         context. Retrieval is never on the critical path.
     """
-    raise NotImplementedError(
-        "chunking and embedding is Evidence-agent work; the kernel defines the ordering "
-        "constraint that it runs only after a clean-stamp exists"
-    )
+    from types import SimpleNamespace
+
+    from shared import storage
+    from shared.routing import embed
+
+    cfg = settings()
+    bucket, name = storage.parse_ref(clean_ref)
+    if bucket != cfg.bucket_clean:
+        log.error(
+            "refusing to index %s: only clean-bucket content is chunked, and this is in %r",
+            clean_ref,
+            bucket,
+        )
+        return 0
+
+    try:
+        text = storage.read_object(clean_ref).decode("utf-8", errors="replace")
+        chunks = chunk_text(text, cfg.chunk_tokens)
+    except Exception as exc:  # noqa: BLE001 — optional control, degrades rather than blocks
+        log.warning("degraded mode: could not chunk %s: %s", clean_ref, exc)
+        return 0
+
+    ctx = SimpleNamespace(review_id=review_id, agent="screening", trace_id="")
+    db = firestore_client()
+    written = 0
+
+    for index, body in enumerate(chunks):
+        chunk_id = f"{review_id}:{_short(clean_ref)}:{index:03d}"
+        try:
+            vector = embed(body, ctx)
+            db.collection(CHUNK_COLLECTION).document(chunk_id).set(
+                {
+                    "chunk_id": chunk_id,
+                    "review_id": review_id,
+                    "doc_ref": clean_ref,
+                    "page": 1,
+                    "text": body,
+                    "embedding": vector,
+                }
+            )
+            written += 1
+        except Exception as exc:  # noqa: BLE001 — see the docstring: retrieval degrades
+            log.warning("degraded mode: chunk %s not indexed: %s", chunk_id, exc)
+
+    log.info("indexed %d/%d chunks for review=%s from %s", written, len(chunks), review_id, name)
+    return written
+
+
+def chunk_text(text: str, chunk_tokens: int) -> list[str]:
+    """Split text into chunks of roughly ``chunk_tokens``, breaking on paragraphs.
+
+    Paragraph boundaries rather than a fixed character stride, so a retrieved passage is a
+    passage rather than a sentence cut in half — a chunk that ends mid-claim reads as a gap to
+    the cross-examination prompt.
+    """
+    budget = max(1, chunk_tokens) * CHARS_PER_TOKEN
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+
+    for paragraph in (p.strip() for p in re.split(r"\n\s*\n", text)):
+        if not paragraph:
+            continue
+        if current and size + len(paragraph) > budget:
+            chunks.append("\n\n".join(current))
+            current, size = [], 0
+        current.append(paragraph)
+        size += len(paragraph)
+
+    if current:
+        chunks.append("\n\n".join(current))
+    return chunks
 
 
 # --- Storage seams -------------------------------------------------------------------------
@@ -481,8 +577,15 @@ def index_chunks(clean_ref: str, review_id: str) -> int:
 
 
 def read_quarantine_object(quarantine_ref: str) -> bytes:
-    """Read raw bytes from quarantine. The only quarantine read in the system."""
-    raise NotImplementedError("quarantine storage lands with the screening service")
+    """Read raw bytes from quarantine. The only quarantine read in the system.
+
+    Raises:
+        ObjectNotFound, InvalidReference: propagated from ``shared.storage``. Nothing is
+            promoted from a reference that does not resolve.
+    """
+    from shared import storage
+
+    return storage.read_object(quarantine_ref)
 
 
 def extract_text(raw: bytes) -> str:
@@ -490,15 +593,42 @@ def extract_text(raw: bytes) -> str:
 
     A document with no extractable text alongside embedded images is flagged for human review
     rather than silently passed — the known blind spot, bounded rather than denied.
+
+    Raises:
+        UnextractableDocument: when nothing could be extracted. The caller does not promote it.
     """
-    raise NotImplementedError("local extraction lands with the screening service")
+    from shared.extraction import extract
+
+    return extract(raw)
 
 
 def write_clean_object(
     quarantine_ref: str, body: str, result: ScreenResult, review_id: str
 ) -> str:
-    """Write the stamped object to the clean bucket and return its reference."""
-    raise NotImplementedError("clean-bucket promotion lands with the screening service")
+    """Write the stamped object to the clean bucket and return its reference.
+
+    Two objects are written: the extracted, screened text, and a sidecar carrying the signed
+    stamp. The sidecar means the clean bucket is self-describing — an object there can be traced
+    back to the template and per-filter verdicts that admitted it, without a Firestore read.
+    """
+    from shared import storage
+
+    cfg = settings()
+    _, name = storage.parse_ref(quarantine_ref)
+    base = f"{review_id}/{Path(name).stem}"
+
+    clean_ref = storage.ref_for(cfg.bucket_clean, f"{base}.txt")
+    storage.write_object(clean_ref, body)
+
+    stamp = sign_stamp(result.model_dump(mode="json"))
+    storage.write_object(
+        storage.ref_for(cfg.bucket_clean, f"{base}.stamp"),
+        stamp,
+        content_type="application/json",
+    )
+
+    log.info("promoted %s -> %s (%s)", quarantine_ref, clean_ref, result.summary())
+    return clean_ref
 
 
 def scrub_pii(text: str, result: ScreenResult) -> str:
