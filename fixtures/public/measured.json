@@ -1,0 +1,25 @@
+{
+  "document": "nara-fisma-2024",
+  "method": "retrieval",
+  "run_at": "2026-08-16",
+  "model": "gemini-3.5-flash",
+  "document_chars": 83909,
+  "chunks_indexed": 63,
+  "passages_retrieved": 13,
+  "prompt_chars": 18125,
+  "prompt_tokens": 4593,
+  "cost_usd": 0.0046129,
+  "facts": {
+    "auditor": "Sikich CPA LLC",
+    "opinion": "Not Effective",
+    "scope": "NARA's information security program and practices consistent with FISMA and reporting instructions that OMB and DHS issued for FY 2024.",
+    "cert_expiry": null,
+    "report_period_end": "2024-07-30"
+  },
+  "notes": {
+    "scope": "Comes from APPENDIX B: OBJECTIVE, SCOPE, AND METHODOLOGY on page 19 of 28 — chunk 047, entirely past the old 24,000-character cut. Truncation could not reach it.",
+    "opinion": "A performance audit issues a conclusion, not an opinion. The prompt used to name only unqualified, qualified and adverse; it now asks for whichever the document states.",
+    "report_period_end": "The audit period, not the fieldwork range. The document states both in consecutive sentences and the prompt disambiguates them explicitly.",
+    "cert_expiry": "Null, and correctly so. This is not a certificate. The expiry query still returned its four nearest passages — the nearest being the acronym glossary — and the model reported no date rather than reading one out of them."
+  }
+}

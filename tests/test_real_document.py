@@ -73,28 +73,70 @@ def test_the_real_pdf_yields_a_text_layer(text):
 
 
 @fetched
-def test_two_thirds_of_the_document_never_reaches_the_model(text):
-    """The finding this file exists to produce, and it is not about a model at all.
+def test_the_document_is_far_larger_than_a_prefix_could_carry(text):
+    """29% of this document reached the model, and this is what was on either side of the line.
 
-    ``MAX_DOCUMENT_CHARS`` is 24,000. This document is 83,909 characters. The synthetic packs
-    are a few thousand each and have never once been truncated, so the cap has never been
-    exercised by a test — and the brief's own warning about *exceptions in an appendix rather
-    than in the exception notes* describes precisely the part that is cut.
+    ``MAX_DOCUMENT_CHARS`` is 24,000; the document is 83,909 characters. The synthetic packs are
+    a few thousand each and were never truncated, which is why no test here had ever exercised
+    the cap.
 
-    Recorded rather than fixed here. Raising the cap costs tokens on every document in every
-    review; the answer is section-aware selection, and choosing it is a design decision rather
-    than a constant.
+    **The honest result, which is narrower than it first looked.** This report front-loads: a
+    table of contents listing every appendix, then an executive summary carrying the objective,
+    the auditor and both date ranges, all inside the first 12,000 characters. So every *field*
+    extraction asks for was reachable by a prefix. What a prefix could not reach was the
+    substance — the methodology, the scoring basis, the status of prior recommendations — which
+    extraction does not currently ask for and cross-examination would.
+
+    The case for retrieving is therefore not "it rescues a field on this document". It is that
+    the prefix worked here by a property of this document's layout, and nothing checks that
+    property before relying on it.
     """
     assert len(text) > MAX_DOCUMENT_CHARS * 3
     seen = text[:MAX_DOCUMENT_CHARS]
 
-    # The four fields the checks are built on all survive: this report states them in its
-    # covering letter and its objective section, both inside the first 12,000 characters.
-    assert "Sikich" in seen
+    # Reachable by a prefix, because this document puts them in its front matter.
+    assert "Sikich CPA LLC" in seen
     assert "Not Effective" in seen
+    assert "The audit covered the period October 1, 2023" in seen
 
-    # The appendices do not. Every recommendation past the cut is invisible to extraction.
+    # Not reachable. The appendix titles are in the table of contents; their contents are not.
+    assert "vulnerability assessment and penetration test" not in seen
+    assert "calculated average scores of the core IG FISMA" not in seen
     assert text.count("Appendix") > seen.count("Appendix")
+
+
+@fetched
+def test_the_recorded_extraction_reads_the_document_rather_than_quoting_it(text):
+    """What the live run returned, pinned so a later change to the queries fails loudly.
+
+    Two of these came from the prompt rather than from retrieval, and saying which is which is
+    the point of recording them at all. ``opinion`` is the performance-audit conclusion in the
+    document's own words, which the previous prompt could not have produced because it named
+    only SOC 2's three opinions by example. ``report_period_end`` is the audit period and not
+    the fieldwork range that follows it in the very next sentence.
+
+    ``scope`` is the one that is not a quotation. The prompt asks for the document's own words
+    and the model returned a paraphrase — "OMB and DHS issued for FY 2024" appears nowhere in
+    the document. Recorded as it is rather than asserted as we would like it, because a
+    paraphrased scope is what ``checks.covers`` performs word-overlap against.
+    """
+    recorded = json.loads(MEASURED.read_text())
+    facts = recorded["facts"]
+
+    assert recorded["method"] == "retrieval"
+    assert facts["auditor"] == "Sikich CPA LLC"
+    assert facts["opinion"] == "Not Effective"
+    assert facts["report_period_end"] == "2024-07-30"
+    assert "through July 30, 2024" in text
+
+    # Not a certificate, and no date was invented for one. The expiry query still returned its
+    # four nearest passages — the nearest being the acronym glossary — and nothing was read out
+    # of them.
+    assert facts["cert_expiry"] is None
+
+    # A paraphrase, recorded as such.
+    assert "OMB and DHS issued for FY 2024" in facts["scope"]
+    assert "OMB and DHS issued for FY 2024" not in text
 
 
 @fetched
@@ -147,47 +189,51 @@ def test_the_conclusion_is_not_where_a_soc_2_puts_it(text):
 @live_model
 @emulator_required
 def test_what_the_extractor_reads_off_a_real_report(review_id, text):
-    """One live extraction call, asserted against what it actually returned.
+    """One live measurement, through the real path, refreshing ``measured.json``.
 
-    The document is external content and it goes through the same door as a vendor upload: a
-    declared-untrusted local stamp, P2 verifying it in the router, and the run declaring itself
-    unscreened. No bypass — the point of measuring extraction on a real document is lost if the
-    measurement takes a path the product does not have.
+    The document is external content and it goes through the same door as a vendor upload: it is
+    chunked and indexed the way any evidence is, given a declared-untrusted local stamp, and P2
+    verifies that stamp in the router. No bypass — the point of measuring extraction on a real
+    document is lost if the measurement takes a path the product does not have.
+
+    Costs one extraction call plus one embedding per chunk and per query. On a free tier capped
+    at twenty generate requests a day, that is one of the twenty.
     """
-    from agents.evidence.extractors import FACTS_PROMPT, _ExtractedFacts
+    import json as _json
+
+    from agents.evidence.extractors import extract_document_facts
     from scenarios.seed import _seed_stamp
-    from shared.armor import record_screening, stamps_for
+    from shared import storage
+    from shared.armor import index_chunks, record_screening
+    from shared.config import settings
     from shared.context import AgentContext
-    from shared.routing import generate
 
-    origin = f"public/{ENTRY['filename']}"
-    record_screening(review_id, _seed_stamp(origin))
+    ref = storage.ref_for(settings().bucket_clean, f"{review_id}/{ENTRY['filename']}.txt")
+    storage.write_object(ref, text.encode("utf-8"), content_type="text/plain")
+    record_screening(review_id, _seed_stamp(ref))
+    indexed = index_chunks(ref, review_id)
 
-    result = generate(
-        "extract_controls",
-        FACTS_PROMPT.format(name=ENTRY["filename"], body=text[:MAX_DOCUMENT_CHARS]),
-        AgentContext(review_id=review_id, agent="evidence", trace_id="t"),
-        response_schema=_ExtractedFacts,
-        source_stamps=stamps_for(review_id, [origin]),
+    facts = extract_document_facts(
+        ref, review_id, AgentContext(review_id=review_id, agent="evidence", trace_id="t")
     )
-    facts = result.parsed
 
     # Written before the assertions, so a call that was spent is a call that was recorded. The
     # first live run of this test passed and its field values were lost to the next traceback,
     # which on a twenty-a-day cap is an expensive way to learn to write the file first.
-    MEASURED.write_text(
-        json.dumps(
-            {"document": ENTRY["id"], "sent_chars": min(len(text), MAX_DOCUMENT_CHARS)}
-            | facts.model_dump(mode="json"),
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    recorded = _json.loads(MEASURED.read_text())
+    recorded |= {
+        "document": ENTRY["id"],
+        "method": "retrieval",
+        "chunks_indexed": indexed,
+        "facts": facts.model_dump(mode="json", exclude={"doc_ref", "name"}),
+    }
+    MEASURED.write_text(_json.dumps(recorded, indent=2) + "\n", encoding="utf-8")
 
     # Recorded, not wished for. See EXTRACTION-NOTES.md for the run these came from.
     assert facts.auditor and "Sikich" in facts.auditor
     assert facts.scope and "information security" in facts.scope.lower()
     assert facts.cert_expiry is None, "this is not a certificate and there is no expiry to find"
+    assert facts.report_period_end is not None, "the audit period is stated and reachable"
 
 
 # --- The boundary ------------------------------------------------------------------------------

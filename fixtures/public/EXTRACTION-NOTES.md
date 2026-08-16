@@ -11,44 +11,86 @@ The document is not in this repository and the reason is in `SOURCES.yaml`. Run
 `python -m fixtures.public.fetch` to reproduce any of this; `tests/test_real_document.py`
 asserts every number below.
 
-**What was measured and what was not.** The structural half — text extraction, the truncation
-window, chunking — ran and is recorded here in full; it needed no model, and it is where the
-three findings are. The live half ran **once and passed**: the extractor named Sikich as the
-auditor, returned a scope naming the information security programme, and correctly returned no
-certificate expiry for a document that is not a certificate. What it returns for `opinion` and
-`report_period_end` is still unmeasured — the day's twentieth free-tier request was spent
-before those values were captured, and the test now writes `measured.json` before it asserts
-anything so a spent call is never an unrecorded one again.
-
-Run it with `DRAWBRIDGE_MEASURE_EXTRACTION=1` and a real `GEMINI_API_KEY` exported; the suite's
-conftest sets a placeholder key by `setdefault`, so an exported one wins.
+**Two rounds.** The first measured the pipeline as it was — a 24,000-character prefix — and
+produced the three findings below. The second ran after extraction was changed to retrieve per
+fact, and is recorded in `measured.json`. Everything here is reproducible with
+`python -m fixtures.public.fetch` and `DRAWBRIDGE_MEASURE_EXTRACTION=1 pytest
+tests/test_real_document.py`.
 
 ---
 
-## 1 · Seventy-one per cent of the document never reaches the model
+## 1 · Seventy-one per cent of the document never reached the model — and the fields survived anyway
 
-`MAX_DOCUMENT_CHARS` is 24,000. This document is 83,909 characters.
+`MAX_DOCUMENT_CHARS` was 24,000. This document is 83,909 characters.
 
 | | in the window | past the cut |
 |---|---|---|
 | "Appendix" | 12 | 13 |
 | "recommendation" | 16 | 71 |
 
-The four fields the deterministic checks are built on — auditor, conclusion, period, scope —
-all survive, because this report states them in a covering letter and an objectives section
-inside the first 12,000 characters. **Everything else does not.** Sixteen recommendations,
-their detail and the appendices they live in are invisible to extraction.
+**The narrower truth, which took a second look to see.** Every *field* extraction asks for was
+inside the window. This report front-loads: a table of contents listing every appendix, then an
+executive summary carrying the objective, the auditor and both date ranges, all within the first
+12,000 characters. A prefix got all five fields right on this document.
 
-The synthetic packs are a few thousand characters each, so the cap has never been exercised by
-any test in this repository, and it has been sitting at a value nobody could have calibrated
-without a document like this one. The brief that asked for this measurement named the risk
-almost exactly: *an exception in an appendix rather than in the exception notes*. On a document
-this size, the appendix is not merely a harder place to look — it is not sent.
+What a prefix could not reach was the substance. The methodology (character 31,005), the FISMA
+scoring basis the conclusion rests on (69,420), and the status of sixteen prior recommendations
+were all past the cut — none of which the fact extractor asks for, and all of which
+cross-examination would.
 
-Recorded rather than fixed. Raising the cap costs tokens on every document in every review, and
-a document three times longer than this one would clear any new constant just as quietly. The
-answer is section-aware selection — retrieve into the extraction window rather than truncating
-into it — which is a design change and not a number.
+So the case for changing it is not *"truncation lost a field here"*. It is that **the prefix
+worked by a property of this document's layout, and nothing checked that property before relying
+on it.** A report that puts its scope only in Appendix B — and plenty do — would have failed
+silently, returning a confident answer drawn from whatever was in the first 24,000 characters.
+That is the failure mode a prefix has and a measurement of one document cannot rule out.
+
+### What retrieval changed, measured
+
+Extraction now runs one query per fact against the document's own chunks.
+
+| | prefix | retrieval |
+|---|---|---|
+| document seen | first 24,000 chars | all 63 chunks searchable |
+| passages in the prompt | one contiguous block | 13 distinct, deduplicated, in document order |
+| prompt characters | 24,000 | 18,125 |
+| prompt tokens | ~6,000 | **4,593** |
+| cost | — | $0.0046 |
+
+**Six of the thirteen retrieved passages sit past the old cut** — chunks 023, 047, 048, 051, 052
+and 060 — and four of those six carry appendix or recommendation text. It is smaller, cheaper,
+and it reads the whole document instead of the beginning of it.
+
+### What the live run returned
+
+```json
+{
+  "auditor":           "Sikich CPA LLC",
+  "opinion":           "Not Effective",
+  "scope":             "NARA's information security program and practices consistent with
+                        FISMA and reporting instructions that OMB and DHS issued for FY 2024.",
+  "cert_expiry":       null,
+  "report_period_end": "2024-07-30"
+}
+```
+
+Three of these are worth reading twice.
+
+**`opinion` is the conclusion, in the document's own words.** A FISMA audit issues no opinion at
+all. The old prompt named unqualified, qualified and adverse by example, which is SOC 2's
+vocabulary and had nothing to match here; it now asks for whichever the document states.
+
+**`cert_expiry` is null, and that is the harder result.** The expiry query still returned four
+passages — the nearest being the acronym glossary, because nothing in a FISMA audit is a
+certificate — and the model reported no date rather than reading one out of them. That is the
+behaviour the prompt was hardened for: *a date that is not in front of you is worse than no
+date*, because what comes back is compared arithmetically by code that cannot tell a guess from
+a reading.
+
+**`scope` is a paraphrase, not a quotation.** "OMB and DHS issued for FY 2024" appears nowhere in
+the document. The prompt asks for the document's own words and did not get them. It is recorded
+as it is rather than asserted as it should be, because `checks.covers` does word-overlap against
+this string to decide whether a report covers the service being bought — so a paraphrase is a
+real input to a real check, and this is the next thing to tighten.
 
 ## 2 · The heading-aware chunker finds no headings
 
@@ -81,31 +123,25 @@ The period is prose rather than a field, and there are two of them:
 > The audit covered the period October 1, 2023, through July 30, 2024. We performed our audit
 > fieldwork from November 2023 to July 2024.
 
-A currency check wants the first. The second is a different range for the same document, sitting
-in the next sentence, and nothing in the prompt tells a model which is which. **Which one the
-extractor returns is the open question** — it is the field `report_period_stale` compares
-against, so getting it wrong moves a finding's severity, and it is the first thing to read out
-of `measured.json` on the next run.
+A currency check wants the first. **The retrieval run returned `2024-07-30` — the audit period,
+not the fieldwork range.** The prompt now names the ambiguity explicitly rather than leaving the
+model to pick, which it had no basis to do.
 
 ---
 
 ## What this changes
 
-Nothing yet, deliberately. All three are recorded and asserted; none is patched, because two of
-them are design decisions rather than constants and the third is a measurement the credential
-blocks. In descending order of what they cost:
+Findings 1 and 3 are fixed. Extraction retrieves per fact and the prompt asks for a conclusion
+rather than for SOC 2's three opinions. What is left, in descending order of what it costs:
 
-0. **Finish the live measurement.** `opinion` and `report_period_end` are one command and one
-   free-tier request away, and both feed findings. The first run proved the auditor and the
-   scope; it did not prove the two fields a date check depends on.
-1. **The truncation window** is a correctness problem on any document over ~25,000 characters,
-   and real assurance reports routinely are. It is now the top of the list, above anything on
-   the cloud-gaps list, because it needs no project to fix and no project to have found.
-2. **Section-aware chunking** should recognise typeset headings, or the rule should stop being
-   described as one. A guarantee that holds only for fixtures is worse than no guarantee.
-3. **The facts prompt's vocabulary** is SOC 2's. It should name the shape it wants — a stated
-   conclusion about effectiveness, whatever word the report uses for it — rather than three
-   example opinions from one report type.
+1. **The paraphrased scope.** `checks.covers` does word-overlap against this string to decide
+   whether a report covers the service being bought, so a paraphrase is a real input to a real
+   check. The prompt asks for the document's own words and did not get them.
+2. **The heading rule** — finding 2 below, unresolved at the time these notes were first
+   written and addressed in the milestone that followed. See `docs/architecture.md`.
+3. **One document is one document.** Every number here describes a single US government audit
+   report. It found things no synthetic fixture could have, and it cannot tell you what a
+   vendor-issued SOC 2 Type II or a CSA CAIQ would do. The fetch script takes more entries.
 
 ## What is never done with this document
 
