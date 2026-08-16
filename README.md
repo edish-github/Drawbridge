@@ -77,6 +77,26 @@ refuse to repeat it.
 `make dev-ui` runs the ADK development UI against the agent packages for inspecting one agent
 interactively; it does not consume the event backbone.
 
+## The whole review, in one command
+
+```
+make emulators
+make seed
+make demo-fixtures VENDOR=datadynamo
+```
+
+Eleven beats, asserted rather than hoped for: intake → Tier 2 with a stated reason → plan
+checkpointed → questionnaire built → **P1 refuses** → contact gate → approval → exactly one
+email → replies parsed incrementally → evidence retrieved and cross-examined → Trust Score with
+a per-domain breakdown → memo → **decision gate** → approval → decided.
+
+`demo-fixtures` answers every model call from the vendor pack, so it is free, deterministic and
+runs in CI. `make demo` runs the same script against the live models and needs API quota — the
+Gemini API free tier caps `gemini-3.5-flash` at 20 requests per day and a full review makes
+about thirty.
+
+Replay either one: same Trust Score, same findings, one email, idempotent skips logged.
+
 ## Synthetic data
 
 Every vendor, document and questionnaire answer in this repository is synthetic and was
