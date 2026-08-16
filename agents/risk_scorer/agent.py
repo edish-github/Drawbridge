@@ -31,13 +31,33 @@ Failure behaviour
 
 from __future__ import annotations
 
+import logging
+
 from google.adk import Agent
 
+from shared.checkpoint import step
+from shared.clients import firestore_client
 from shared.config import settings
-from shared.domain import Review
-from shared.events import EventEnvelope
+from shared.context import context_for
+from shared.domain import Finding, Review
+from shared.events import (
+    TOPIC_REVIEW_FINDINGS_READY,
+    TOPIC_REVIEW_RESCORE,
+    TOPIC_REVIEW_SCORE_READY,
+    EventEnvelope,
+    publish,
+)
+from shared.memory import recall_dossier
+from shared.state import park
+from shared.telemetry import record_decision, span
+
+log = logging.getLogger("drawbridge.risk_scorer")
 
 SERVICE_ACCOUNT = "sa-scorer"
+
+COLLECTION_SCORES = "scores"
+STEP_SCORE = "score"
+STEP_MEMO = "memo"
 
 TOOLS: list = []
 
@@ -81,6 +101,148 @@ def handle_event(event: EventEnvelope, review: Review) -> None:
     and in phase.
 
     Raises:
-        NotImplementedError: contract only.
+        UnhandledEvent: on an event type this agent has no branch for.
     """
-    raise NotImplementedError
+    if event.type in (TOPIC_REVIEW_FINDINGS_READY, TOPIC_REVIEW_RESCORE):
+        on_findings_ready(event, review)
+        return
+    raise UnhandledEvent(f"risk_scorer has no branch for {event.type!r}")
+
+
+class UnhandledEvent(Exception):
+    """An event reached an agent with no branch for it."""
+
+
+def on_findings_ready(event: EventEnvelope, review: Review) -> None:
+    """Score the review, write the memo, and publish the result.
+
+    Scoring is arithmetic and runs first; the memo is one deep-model call and runs second,
+    against a band it is given rather than one it decides. If the memo fails, the score stays
+    written and the review parks — a score with no reasoning behind it is not something to
+    approve against, and losing the score as well would mean re-running the expensive passes
+    that produced it.
+
+    ``review.rescore`` routes here too. Rescoring is the same arithmetic over a finding set
+    that has changed, which is why raising Adversarial Conduct can simply add a finding and
+    republish rather than reaching into a score.
+
+    Raises:
+        RubricError: on a finding the rubric cannot map. The review parks; the number is never
+            computed from a partial finding set.
+    """
+    from agents.risk_scorer.memo import write_memo
+    from agents.risk_scorer.scoring import Flags, compute_score, explain, load_rubric
+
+    ctx = context_for(event, agent="risk_scorer")
+    db = firestore_client()
+
+    with span("risk_scorer.score", ctx) as s:
+        findings = load_findings(review.review_id)
+        rubric = load_rubric()
+        flags = Flags(adversarial_conduct=adversarial_flag(review.review_id))
+
+        try:
+            result = compute_score(findings, rubric, flags, tier=review.tier)
+        except Exception as exc:
+            park(review.review_id, reason="scoring_failed")
+            log.error("scoring failed for review=%s: %s", review.review_id, exc)
+            raise
+
+        breakdown = explain(result, rubric, tier=review.tier)
+        step(
+            STEP_SCORE,
+            ctx,
+            lambda: save_score(review.review_id, result, breakdown),
+        )
+
+        vendor = db.collection("vendors").document(review.vendor_id).get().to_dict() or {}
+        try:
+            step(
+                STEP_MEMO,
+                ctx,
+                lambda: write_memo(
+                    ctx,
+                    review.review_id,
+                    findings=findings,
+                    score=result,
+                    vendor=vendor,
+                    dossier=recall_dossier(review.vendor_id),
+                ),
+            )
+        except Exception as exc:
+            park(review.review_id, reason="memo_failed")
+            log.error("memo failed for review=%s: %s", review.review_id, exc)
+            raise
+
+        record_decision(
+            s,
+            goal=f"score {vendor.get('name', review.vendor_id)} from {len(findings)} finding(s)",
+            decision=f"Trust Score {result.score}, band {result.band}",
+        )
+
+        publish(
+            TOPIC_REVIEW_SCORE_READY,
+            review.review_id,
+            {
+                "score": result.score,
+                "band": result.band,
+                "breakdown": result.breakdown,
+                "adversarial_applied": result.adversarial_applied,
+            },
+            ctx=ctx,
+        )
+
+    log.info(
+        "review=%s scored %d (%s)\n%s",
+        review.review_id,
+        result.score,
+        result.band,
+        "\n".join(f"    {line}" for line in breakdown),
+    )
+
+
+def load_findings(review_id: str) -> list[Finding]:
+    """Return every finding recorded for this review, ordered by id.
+
+    Ordered so the arithmetic is reproducible: the score is order-independent by construction,
+    but the breakdown printed in the binder should not shuffle between runs.
+    """
+    from google.cloud.firestore_v1 import FieldFilter
+
+    docs = (
+        firestore_client()
+        .collection("findings")
+        .where(filter=FieldFilter("review_id", "==", review_id))
+        .stream()
+    )
+    return sorted(
+        (Finding.model_validate(d.to_dict()) for d in docs), key=lambda f: f.finding_id
+    )
+
+
+def adversarial_flag(review_id: str) -> bool:
+    """Return whether Adversarial Conduct has been raised on this review."""
+    snap = firestore_client().collection("reviews").document(review_id).get()
+    return bool((snap.to_dict() or {}).get("adversarial_conduct", False))
+
+
+def save_score(review_id, result, breakdown: list[str]) -> dict:
+    """Persist the score and the arithmetic that produced it.
+
+    The breakdown is stored, not recomputed on demand. It is binder section 5, and a binder
+    that recomputed it would be showing today's rubric against a decision taken under an
+    earlier one.
+    """
+    doc = {
+        "review_id": review_id,
+        "score": result.score,
+        "band": result.band,
+        "breakdown": result.breakdown,
+        "adversarial_applied": result.adversarial_applied,
+        "arithmetic": breakdown,
+    }
+    firestore_client().collection(COLLECTION_SCORES).document(review_id).set(doc)
+    firestore_client().collection("reviews").document(review_id).set(
+        {"score": result.score, "band": result.band}, merge=True
+    )
+    return doc
