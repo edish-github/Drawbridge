@@ -30,6 +30,7 @@ from scenarios.seed import (
     load_vendor,
     replies_for,
     seed_clean_evidence,
+    seed_register,
     seed_reply,
     seed_vendor,
 )
@@ -219,6 +220,10 @@ def open_and_plan(demo: Demo) -> None:
     profile = load_vendor(demo.vendor)["profile"]
 
     seed_vendor(demo.vendor)
+    # The approved-vendor register stands in for an internal system the organisation already
+    # runs. The fourth-party diff is a set-difference against it, so a demo without it would
+    # degrade to extracting the chain and raising nothing.
+    seed_register()
     forget_prior_runs(demo.vendor)
     demo.review_id = open_review(profile)
     demo.beat("intake")

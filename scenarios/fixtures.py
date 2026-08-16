@@ -330,23 +330,42 @@ class FixtureResponder:
         return out
 
     def _subprocessors(self, prompt: str) -> list:
-        """Read the subprocessor table out of the document."""
+        """Read the subprocessor table out of the document.
+
+        Column order follows the fixtures: name, purpose, data processed, whether customer
+        content is processed, location, and whether a data processing agreement is held. A cell
+        the document does not carry stays ``None`` rather than becoming a false — silence is
+        not a no, and the finding rules downstream depend on the difference.
+        """
         from agents.evidence.subprocessors import ExtractedSubprocessor
 
         rows = []
         for line in prompt.splitlines():
-            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            cells = [c.strip().strip("*").strip() for c in line.strip().strip("|").split("|")]
             if len(cells) < 4 or cells[0].lower() in ("subprocessor", "---"):
                 continue
             if set(cells[0]) <= set("- "):
                 continue
-            processes = cells[3].lower().startswith("y") if len(cells) > 3 else None
             rows.append(
                 ExtractedSubprocessor(
-                    name=cells[0], purpose=cells[1], processes_customer_data=processes
+                    name=cells[0],
+                    purpose=cells[1],
+                    processes_customer_data=_yes_no(cells[3]),
+                    jurisdiction=cells[4] or None if len(cells) > 4 else None,
+                    dpa_claimed=_yes_no(cells[5]) if len(cells) > 5 else None,
                 )
             )
         return rows
+
+
+def _yes_no(cell: str) -> bool | None:
+    """Read a yes/no table cell. ``None`` for anything else, including an empty one."""
+    lowered = cell.strip().lower()
+    if lowered.startswith("y"):
+        return True
+    if lowered.startswith("n"):
+        return False
+    return None
 
 
 def _between(text: str, start: str, end: str) -> str:

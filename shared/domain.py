@@ -12,7 +12,7 @@ of construction, never as a partially-built object. ``validate_transition`` rais
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
 
@@ -167,13 +167,29 @@ class EvidenceChunk(BaseModel):
 
 
 class Subprocessor(BaseModel):
+    """One link in the fourth-party chain, as extracted and as resolved.
+
+    The first five fields are what the vendor's own document said. The rest are what the
+    organisation knows, resolved against the approved-vendor register in code — and the split
+    is the point: a model reads the document, arithmetic decides what it means.
+
+    ``processes_customer_data`` and ``dpa_claimed`` are three-valued on purpose. A document that
+    does not say is not a document that says no, and collapsing the two would turn every silent
+    subprocessor list into a finding about the vendor rather than about the list.
+    """
+
     subprocessor_id: str
     vendor_id: str
     name: str
     purpose: str
-    processes_customer_data: bool
+    processes_customer_data: bool | None = None
+    jurisdiction: str | None = None
+    dpa_claimed: bool | None = None
+
     known_to_org: bool = False
     prior_review_id: str | None = None
+    register_status: str | None = None
+    review_valid_until: date | None = None
 
 
 class MemoryNote(BaseModel):

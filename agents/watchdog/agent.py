@@ -192,7 +192,11 @@ def resolve_vendor(signal: Signal) -> Vendor | None:
     from agents.watchdog.relevance import matches_identity
 
     for doc in db.collection("vendors").stream():
-        vendor = Vendor.model_validate(doc.to_dict())
+        try:
+            vendor = Vendor.model_validate(doc.to_dict())
+        except Exception as exc:  # noqa: BLE001 — one bad row never stops the sweep
+            log.warning("vendor record %s does not validate and was skipped: %s", doc.id, exc)
+            continue
         if matches_identity(signal, vendor.primary_domain, vendor.legal_entity_name):
             return vendor
     return None

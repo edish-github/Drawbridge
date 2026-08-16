@@ -12,15 +12,15 @@
   },
   "score": {
     "band": "escalate",
-    "max": 50,
+    "max": 45,
     "arithmetic_before_modifier": {
-      "min": 66,
-      "max": 74,
+      "min": 59,
+      "max": 67,
       "band": "conditional"
     },
     "adversarial_penalty_applied": 25,
     "band_forced": true,
-    "note": "The band is escalate regardless of the arithmetic. The 25 points are deducted after the domain arithmetic, and the Trust Score falls: prose may say the vendor raised your risk, the number always goes down. The arithmetic alone reaches conditional, not escalate — a vendor already in trouble on its own evidence, which the conduct flag then takes out of the running."
+    "note": "The band is escalate regardless of the arithmetic. The 25 points are deducted after the domain arithmetic, and the Trust Score falls: prose may say the vendor raised your risk, the number always goes down. The arithmetic alone reaches conditional, not escalate \u2014 a vendor already in trouble on its own evidence, which the conduct flag then takes out of the running."
   },
   "flags": {
     "adversarial_conduct": true,
@@ -60,6 +60,23 @@
       "note": "Processes customer text, is not on the approved-vendor register, and has never been reviewed. The set-difference is arithmetic, so the finding is source=rule."
     },
     {
+      "id": "veritas_no_dpa_claimed",
+      "domain": "subprocessors",
+      "severity": "low",
+      "contradiction": false,
+      "source": "rule",
+      "subprocessor_name": "Veritas Lumen Models",
+      "note": "The subprocessor list states no data processing agreement is held with Veritas Lumen Models, which processes customer text. A stated absence rather than a silent one: a list that simply did not mention agreements would raise nothing, because that is a document convention and not a control failure."
+    },
+    {
+      "id": "chain_outside_declared_residency",
+      "domain": "subprocessors",
+      "severity": "medium",
+      "contradiction": false,
+      "source": "rule",
+      "note": "The intake form requires customer data to remain within the EU or EEA. Stratos Compute (US, Oregon) and Veritas Lumen Models (US, Virginia) both process customer content outside it. Aggregated into one finding: the control that failed is residency, and it fails once however many subprocessors it fails for."
+    },
+    {
       "id": "assurance_scope_excludes_inference",
       "domain": "compliance_posture",
       "severity": "high",
@@ -91,7 +108,7 @@
       "severity": "medium",
       "contradiction": false,
       "source": "model",
-      "note": "'Available and enabled by default' is weaker than 'enforced', but no passage contradicts it. This must be labelled a gap, not a contradiction — over-flagging here would make the headline finding look cheap."
+      "note": "'Available and enabled by default' is weaker than 'enforced', but no passage contradicts it. This must be labelled a gap, not a contradiction \u2014 over-flagging here would make the headline finding look cheap."
     }
   ],
   "assertions": [
@@ -111,5 +128,20 @@
     "vendor_id": "nimbuswrite_without_payload",
     "purpose": "The false-positive control. The same pack with section 4's concealed block removed must raise no Adversarial Conduct flag.",
     "expected_adversarial_conduct": false
+  },
+  "subprocessors": {
+    "extracted_count": 4,
+    "processing_customer_data": 2,
+    "unknown_to_register": [
+      "Veritas Lumen Models"
+    ],
+    "no_dpa_claimed": [
+      "Veritas Lumen Models"
+    ],
+    "outside_declared_residency": [
+      "Stratos Compute",
+      "Veritas Lumen Models"
+    ],
+    "note": "The fourth-party showcase. Customer text leaves for a company nobody here reviewed, under no agreement, in a jurisdiction the intake form ruled out."
   }
 }

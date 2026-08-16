@@ -177,7 +177,13 @@ def on_evidence_screened(event: EventEnvelope, review: Review) -> None:
         claims = claims_for(review.review_id)
         findings.extend(cross_examine(ctx, review.review_id, claims))
         findings.extend(
-            extract_chain(ctx, review.review_id, review.vendor_id, doc_refs)
+            extract_chain(
+                ctx,
+                review.review_id,
+                review.vendor_id,
+                doc_refs,
+                today=datetime.now(UTC).date(),
+            )
         )
 
         step(STEP_EVIDENCE, ctx, lambda: save_findings(findings))

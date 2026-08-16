@@ -433,3 +433,19 @@ tr:last-child td {
 .error {
   color: var(--danger);
 }
+
+/* The fourth-party chain. Indentation carries the depth; the pills carry the meaning. */
+.chain,
+.chain ul {
+  list-style: none;
+  margin: 0;
+  padding-left: 0;
+}
+.chain ul {
+  padding-left: 20px;
+  border-left: 1px solid var(--line);
+  margin-left: 5px;
+}
+.chain li {
+  padding: 6px 0;
+}

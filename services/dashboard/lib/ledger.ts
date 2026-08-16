@@ -85,6 +85,25 @@ export async function findings(reviewId: string): Promise<Doc[]> {
   return rows.sort((a, b) => String(a.finding_id).localeCompare(String(b.finding_id)));
 }
 
+/**
+ * The fourth-party chain: you, the vendor, and the companies behind the vendor.
+ *
+ * Read against the vendor rather than the review, because a subprocessor is a fact about the
+ * company and survives the review that discovered it. The register status on each node is what
+ * the Evidence agent resolved against the organisation's own approved-vendor list — the one
+ * collection in the system with readers and no writer.
+ */
+export async function chain(vendorId: string): Promise<Doc[]> {
+  if (!vendorId) return [];
+  const snapshot = await db()
+    .collection("subprocessors")
+    .where("vendor_id", "==", vendorId)
+    .get();
+  return snapshot.docs
+    .map((d) => d.data() as Doc)
+    .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")));
+}
+
 export async function cards(reviewId: string): Promise<Doc[]> {
   const rows = await forReview("dashboard_events", reviewId);
   return rows.sort((a, b) => String(a.at ?? "").localeCompare(String(b.at ?? "")));

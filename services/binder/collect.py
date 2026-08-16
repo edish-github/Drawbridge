@@ -63,6 +63,7 @@ class Binder:
     monitoring: list[dict] = field(default_factory=list)
     subprocessors: list[dict] = field(default_factory=list)
     followups: dict[str, int] = field(default_factory=dict)
+    chain: dict = field(default_factory=dict)
 
     @property
     def review_id(self) -> str:
@@ -125,6 +126,7 @@ def collect(review_id: str) -> Binder:
         str(f.get("question_id")): int(f.get("count", 0))
         for f in _by_review("followups", review_id)
     }
+    binder.chain = _chain_view(str(review.get("vendor_id", "")))
 
     log.info(
         "collected binder material for review=%s: %d timeline, %d answers, %d documents, "
@@ -164,6 +166,35 @@ def _timeline(review_id: str) -> list[dict]:
     for event in events:
         event.setdefault("ts", event.get("at", ""))
     return sorted(events, key=lambda e: str(e.get("ts", "")))
+
+
+def _chain_view(vendor_id: str) -> dict:
+    """Return the fourth-party chain: you, the vendor, and the companies behind the vendor.
+
+    Read here rather than imported from ``agents.evidence.subprocessors``, which builds the same
+    shape. That module imports ``shared.routing``, and the binder's promise that it makes no
+    model call is asserted by an import graph — a promise that has to be true transitively or it
+    is not a promise. The duplication is fifteen lines of Firestore reads and the alternative is
+    a document that could be steered by the content it reports on.
+    """
+    if not vendor_id:
+        return {}
+
+    vendor = firestore_client().collection("vendors").document(vendor_id).get().to_dict() or {}
+    chain = _sorted(_by_field("subprocessors", "vendor_id", vendor_id), "name")
+    if not chain:
+        return {}
+
+    return {
+        "organisation": "This organisation",
+        "vendor": {
+            "name": vendor.get("name", vendor_id),
+            "vendor_id": vendor_id,
+            "residency_required": (vendor.get("intake") or {}).get("data_residency_required")
+            or [],
+        },
+        "subprocessors": chain,
+    }
 
 
 def _by_review(collection: str, review_id: str) -> list[dict]:

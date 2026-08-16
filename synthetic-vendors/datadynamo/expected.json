@@ -15,8 +15,8 @@
   },
   "score": {
     "band": "conditional",
-    "min": 64,
-    "max": 70
+    "min": 62,
+    "max": 68
   },
   "flags": {
     "adversarial_conduct": false
@@ -35,7 +35,10 @@
       "source": "model",
       "claim_ref": "AC01",
       "evidence_ref_must_resolve": true,
-      "evidence_chunk_must_contain": ["exception", "mfa"],
+      "evidence_chunk_must_contain": [
+        "exception",
+        "mfa"
+      ],
       "note": "The questionnaire claims organisation-wide MFA. Exception note 3.2 of the audit report records that MFA is not enforced for administrative access and was unremediated at period end."
     },
     {
@@ -64,6 +67,14 @@
       "note": "The report period ended 30 June 2025, one month past the 12-month currency threshold. Severity is graded on the overrun: a report a month out of date and one three years out of date are not the same finding, and nothing in this report records a control that failed."
     },
     {
+      "id": "wayfarer_register_review_expired",
+      "domain": "subprocessors",
+      "severity": "low",
+      "contradiction": false,
+      "source": "rule",
+      "note": "Wayfarer Geocoding is on this organisation's approved-vendor register and its review lapsed on 30 September 2025, while it continues to receive origin and destination addresses through DataDynamo. Somebody did the work once and the paperwork went stale, which is a lower severity than never having reviewed them at all. A date comparison against an internal register, so the finding is source=rule."
+    },
+    {
       "id": "no_dr_test_in_period",
       "domain": "business_continuity",
       "severity": "low",
@@ -75,7 +86,12 @@
   ],
   "followups": {
     "expected_count": 4,
-    "on_questions": ["DP01", "AC02", "AC03", "CP03"],
+    "on_questions": [
+      "DP01",
+      "AC02",
+      "AC03",
+      "CP03"
+    ],
     "hero_question": "DP01",
     "reason": "Four answers land below the confidence threshold, so each draws one targeted follow-up that quotes the vendor's own words back and names the evidence required. DP01 is the one the demo reads out: 'We follow industry best practice for encryption both at rest and in transit' is the exact non-answer that makes manual chasing the pain this project removes.",
     "must_not_exceed_cap": 2,
@@ -83,7 +99,13 @@
   },
   "subprocessors": {
     "extracted_count": 4,
-    "processing_customer_data": 3
+    "processing_customer_data": 3,
+    "unknown_to_register": 0,
+    "register_review_expired": [
+      "Wayfarer Geocoding"
+    ],
+    "jurisdictions_outside_residency": 0,
+    "note": "Every subprocessor is on the register and every one is in the EU, which the intake form requires. The only gap is a review that lapsed \u2014 the quiet version of the fourth-party finding, and the one an analyst would otherwise never look for."
   },
   "assertions": [
     "The MFA contradiction is present with domain=access_control, severity=high, contradiction=true and source=model.",
@@ -94,6 +116,7 @@
     "Exactly one targeted follow-up is sent for DP01, quoting the vendor's own answer, and never more than the cap.",
     "A follow-up outstanding on DP01 does not stop the review reaching the coverage threshold.",
     "The band is conditional, and the score sits at least four points inside it at both ends.",
-    "No Adversarial Conduct flag is raised."
+    "No Adversarial Conduct flag is raised.",
+    "The fourth-party diff runs against the approved-vendor register and raises exactly one finding, source=rule."
   ]
 }

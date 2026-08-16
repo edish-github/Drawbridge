@@ -145,6 +145,107 @@ def seed_vendor(slug: str, *, clock=None) -> str:
     return profile["vendor_id"]
 
 
+APPROVED_VENDOR_REGISTER = (
+    # The internal system the Evidence agent queries. Nine companies the organisation has
+    # already put through a review of its own, with the dates those reviews are good until.
+    #
+    # Two names are deliberately absent, and the absences are the feature. Veritas Lumen Models
+    # receives NimbusWrite's customer text and nobody here has ever heard of it; Pathview
+    # Telemetry is the quieter version of the same thing, and raises nothing because it receives
+    # only aggregate counters.
+    #
+    # Wayfarer Geocoding is on the register with a review that lapsed in September 2025 — a
+    # company somebody did the work on once, whose paperwork went stale while it carried on
+    # receiving origin and destination addresses.
+    {
+        "name": "Aurelius Cloud Services",
+        "last_review_id": "rv-2024-0117",
+        "review_status": "current",
+        "review_valid_until": "2027-03-31",
+        "jurisdictions": ["EU"],
+    },
+    {
+        "name": "Wayfarer Geocoding",
+        "last_review_id": "rv-2023-0442",
+        "review_status": "current",
+        "review_valid_until": "2025-09-30",
+        "jurisdictions": ["EU"],
+    },
+    {
+        "name": "Sendline Notifications",
+        "last_review_id": "rv-2025-0019",
+        "review_status": "current",
+        "review_valid_until": "2027-07-31",
+        "jurisdictions": ["EU"],
+    },
+    {
+        "name": "Ledgerbridge Analytics",
+        "last_review_id": "rv-2025-0088",
+        "review_status": "current",
+        "review_valid_until": "2027-01-15",
+        "jurisdictions": ["EU"],
+    },
+    {
+        "name": "Northgate Cloud Infrastructure",
+        "last_review_id": "rv-2024-0301",
+        "review_status": "current",
+        "review_valid_until": "2027-06-30",
+        "jurisdictions": ["EU"],
+    },
+    {
+        "name": "Postmark Relay Services",
+        "last_review_id": "rv-2025-0121",
+        "review_status": "current",
+        "review_valid_until": "2027-02-28",
+        "jurisdictions": ["EU"],
+    },
+    {
+        "name": "Helpdesk Loop",
+        "last_review_id": "rv-2025-0202",
+        "review_status": "current",
+        "review_valid_until": "2026-12-31",
+        "jurisdictions": ["EU"],
+    },
+    {
+        "name": "Stratos Compute",
+        "last_review_id": "rv-2024-0509",
+        "review_status": "current",
+        "review_valid_until": "2027-04-30",
+        "jurisdictions": ["US", "EU"],
+    },
+    {
+        "name": "Cadence Mail",
+        "last_review_id": "rv-2025-0310",
+        "review_status": "current",
+        "review_valid_until": "2027-05-31",
+        "jurisdictions": ["US"],
+    },
+)
+"""The approved-vendor register, as a fixture.
+
+Seeded here because it stands in for an internal system the organisation already runs — a GRC
+tool, a procurement database, a spreadsheet somebody owns. Nothing in the fleet writes to it,
+and the permission matrix gives it readers and no writer: an agent that could add a name could
+make an unknown fourth party known by writing one document, which is the finding rather than
+the fix.
+"""
+
+
+def seed_register() -> int:
+    """Load the approved-vendor register. Returns the number of entries written.
+
+    Idempotent on the company name, so re-seeding replaces rather than duplicates.
+    """
+    from agents.evidence.subprocessors import COLLECTION_REGISTER, _normalise
+
+    db = firestore_client()
+    for entry in APPROVED_VENDOR_REGISTER:
+        db.collection(COLLECTION_REGISTER).document(_normalise(entry["name"])).set(entry)
+
+    log.info("seeded the approved-vendor register with %d entries", len(APPROVED_VENDOR_REGISTER))
+    return len(APPROVED_VENDOR_REGISTER)
+
+
 def seed_clean_evidence(review_id: str, slug: str) -> list[str]:
     """Place a vendor's evidence into the clean bucket as fixtures. Returns the clean refs.
 
@@ -319,6 +420,7 @@ RESETTABLE_COLLECTIONS = (
     "inert_excerpts",
     "subprocessors",
     "followups",
+    "approved_vendors",
     # Both are vendor-scoped rather than review-scoped, and both are cleared for the same
     # reason: they are what makes a run *not* repeat itself. A dossier holding last run's
     # certificate expiry and a tasks collection holding last run's signal id are exactly what a
@@ -384,8 +486,12 @@ def main() -> int:
     for slug in args.vendors:
         seed_vendor(slug)
     seed_filler(args.filler)
+    entries = seed_register()
 
-    print(f"seeded {len(args.vendors)} vendor(s) and {args.filler} filler review(s)")
+    print(
+        f"seeded {len(args.vendors)} vendor(s), {args.filler} filler review(s) and "
+        f"{entries} approved-vendor register entries"
+    )
     print("evidence is in quarantine; the demo runner seeds clean-bucket fixtures per review")
     return 0
 

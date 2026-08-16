@@ -12,8 +12,15 @@
   "intake": {
     "submitted_by": "Marcus Adeyemi, Procurement",
     "description": "AI writing assistant for the marketing and support teams. Will process customer support transcripts and draft replies.",
-    "declared_data_categories": ["customer_content", "internal_operational"],
+    "declared_data_categories": [
+      "customer_content",
+      "internal_operational"
+    ],
     "declared_system_access": "none",
+    "data_residency_required": [
+      "EU",
+      "EEA"
+    ],
     "annual_spend_usd": 40000,
     "service_being_bought": "NimbusWrite Team, enterprise tier"
   },

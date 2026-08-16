@@ -132,6 +132,11 @@ tr:last-child td { border-bottom: 0; }
   background: var(--shell); color: var(--mute); font-size: 12px; white-space: pre-wrap;
 }
 .provenance { margin-top: 6px; color: var(--faint); }
+/* The fourth-party chain. Indentation carries the depth; the pills carry the meaning. */
+.chain, .chain ul { list-style: none; margin: 0; padding-left: 0; }
+.chain ul { padding-left: 22px; border-left: 1px solid var(--line); margin-left: 6px; }
+.chain li { padding: 6px 0; }
+.chain .provenance { margin-top: 2px; }
 .arithmetic {
   margin: 0; padding: 14px 16px; background: var(--shell); border: 1px solid var(--line);
   border-radius: 8px; white-space: pre; overflow-x: auto;
@@ -397,6 +402,74 @@ def _section_3_evidence(binder: Binder) -> str:
 </section>"""
 
 
+def _chain(binder: Binder) -> str:
+    """The fourth-party chain: you, the vendor, and the companies behind the vendor.
+
+    A nested list rather than a diagram. The shape is three levels deep and the only thing a
+    reader is looking for is which nodes are marked unknown, which a list carries as well as any
+    chart and prints without a rendering step.
+    """
+    view = binder.chain
+    if not view or not view.get("subprocessors"):
+        return ""
+
+    vendor = view.get("vendor") or {}
+    required = vendor.get("residency_required") or []
+    nodes = []
+    for sub in view["subprocessors"]:
+        marks = []
+        if not sub.get("known_to_org"):
+            marks.append("<span class='pill pill-untrusted'>not on the register</span>")
+        elif sub.get("register_status") and sub["register_status"] != "current":
+            marks.append(
+                f"<span class='pill pill-medium'>review {_text(sub['register_status'])}</span>"
+            )
+        else:
+            marks.append("<span class='pill pill-clean'>reviewed</span>")
+        if sub.get("processes_customer_data"):
+            marks.append("<span class='pill pill-high'>customer data</span>")
+        if sub.get("dpa_claimed") is False:
+            marks.append("<span class='pill pill-medium'>no agreement</span>")
+
+        detail = " · ".join(
+            part
+            for part in (
+                _text(sub.get("purpose")),
+                _text(sub.get("jurisdiction")) if sub.get("jurisdiction") else "",
+                f"prior review {_text(sub['prior_review_id'])}"
+                if sub.get("prior_review_id")
+                else "",
+            )
+            if part
+        )
+        nodes.append(
+            f"<li><strong>{_text(sub.get('name'))}</strong> {' '.join(marks)}"
+            f"<div class='provenance'>{detail}</div></li>"
+        )
+
+    residency = (
+        f"<p class='provenance'>The intake form requires customer data to remain within "
+        f"{_text(', '.join(required))}.</p>"
+        if required
+        else ""
+    )
+    return f"""
+  <h3>The fourth-party chain</h3>
+  <p>Your attack surface, applied recursively. Every company below receives something because
+  you bought from the vendor above it, and the register each one is checked against is this
+  organisation's own — not the vendor's word for it.</p>
+  {residency}
+  <ul class="chain">
+    <li><strong>{_text(view.get("organisation"))}</strong>
+      <ul>
+        <li><strong>{_text(vendor.get("name"))}</strong>
+          <ul>{"".join(nodes)}</ul>
+        </li>
+      </ul>
+    </li>
+  </ul>"""
+
+
 def _section_4_findings(binder: Binder) -> str:
     blocks = []
     for finding in binder.findings:
@@ -433,6 +506,7 @@ def _section_4_findings(binder: Binder) -> str:
   contradiction cites the passage that refutes the claim, with the chunk and page it came
   from.</p>
   {"".join(blocks) if blocks else _empty("No findings were recorded for this review.")}
+  {_chain(binder)}
 </section>"""
 
 

@@ -14,8 +14,14 @@
   "intake": {
     "submitted_by": "Marcus Adeyemi, Procurement",
     "description": "Internal analytics only. Routing optimisation over our own shipment volumes.",
-    "declared_data_categories": ["internal_operational"],
+    "declared_data_categories": [
+      "internal_operational"
+    ],
     "declared_system_access": "none",
+    "data_residency_required": [
+      "EU",
+      "EEA"
+    ],
     "annual_spend_usd": 96000,
     "service_being_bought": "DataDynamo Routing Platform, enterprise tier"
   },
@@ -23,7 +29,7 @@
     "name": "Tobias Renn",
     "role": "Compliance Manager",
     "email": "compliance@datadynamo-logistics.example",
-    "persona": "Cooperative and quick to reply, but answers in confident generalities and attaches documents without reading them closely. Not adversarial — the contradictions are between what he believes to be true and what his own auditor wrote down."
+    "persona": "Cooperative and quick to reply, but answers in confident generalities and attaches documents without reading them closely. Not adversarial \u2014 the contradictions are between what he believes to be true and what his own auditor wrote down."
   },
   "notes": "Intake declares internal analytics only. The answer to Q23 names customer records processed in an EU environment, which re-tiers the review upward from 2 to 1 mid-flight and adds the additional domain's questions."
 }

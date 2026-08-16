@@ -15,6 +15,7 @@
 import Link from "next/link";
 import {
   cards,
+  chain,
   findings,
   review,
   score,
@@ -47,11 +48,12 @@ export default async function Timeline({ params }: { params: Promise<{ id: strin
     );
   }
 
-  const [entries, result, raised, recorded] = await Promise.all([
+  const [entries, result, raised, recorded, fourthParties] = await Promise.all([
     timeline(id),
     score(id),
     findings(id),
     cards(id),
+    chain(String(found.vendor_id)),
   ]);
 
   return (
@@ -143,6 +145,12 @@ export default async function Timeline({ params }: { params: Promise<{ id: strin
             )}
           </div>
 
+          <FourthPartyChain
+            vendor={String(found.vendor?.name ?? found.vendor_id)}
+            required={(found.vendor?.intake?.data_residency_required ?? []) as string[]}
+            chain={fourthParties}
+          />
+
           <div className="card">
             <h2>Cards raised</h2>
             {recorded.length === 0 ? (
@@ -164,6 +172,78 @@ export default async function Timeline({ params }: { params: Promise<{ id: strin
         </div>
       </div>
     </main>
+  );
+}
+
+/**
+ * You → the vendor → the companies behind the vendor.
+ *
+ * A nested list rather than a chart. The shape is three levels deep and the only thing anybody
+ * reads it for is which nodes are marked unknown, which a list carries as well as a diagram and
+ * renders in a screenshot without a library.
+ */
+function FourthPartyChain({
+  vendor,
+  required,
+  chain,
+}: {
+  vendor: string;
+  required: string[];
+  chain: Doc[];
+}) {
+  if (chain.length === 0) return null;
+
+  return (
+    <div className="card">
+      <h2>Fourth-party chain</h2>
+      <p style={{ color: "var(--mute)" }}>
+        Your attack surface, applied recursively. Each company is checked against this
+        organisation&rsquo;s own approved-vendor register, not against the vendor&rsquo;s word
+        for it.
+      </p>
+      {required.length > 0 ? (
+        <p className="label">Customer data must remain within {required.join(", ")}</p>
+      ) : null}
+      <ul className="chain">
+        <li>
+          <strong>This organisation</strong>
+          <ul>
+            <li>
+              <strong>{vendor}</strong>
+              <ul>
+                {chain.map((node) => (
+                  <li key={String(node.subprocessor_id)}>
+                    <strong>{String(node.name)}</strong>{" "}
+                    {node.known_to_org ? (
+                      node.register_status === "current" ? (
+                        <span className="pill pill-scored">reviewed</span>
+                      ) : (
+                        <span className="pill pill-medium">
+                          review {String(node.register_status)}
+                        </span>
+                      )
+                    ) : (
+                      <span className="pill pill-needs_human">not on the register</span>
+                    )}{" "}
+                    {node.processes_customer_data ? (
+                      <span className="pill pill-high">customer data</span>
+                    ) : null}{" "}
+                    {node.dpa_claimed === false ? (
+                      <span className="pill pill-medium">no agreement</span>
+                    ) : null}
+                    <div className="mono" style={{ color: "var(--faint)", marginTop: 2 }}>
+                      {[node.purpose, node.jurisdiction, node.prior_review_id]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </li>
+          </ul>
+        </li>
+      </ul>
+    </div>
   );
 }
 
