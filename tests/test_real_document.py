@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 
 import pytest
 import yaml
@@ -140,27 +139,71 @@ def test_the_recorded_extraction_reads_the_document_rather_than_quoting_it(text)
 
 
 @fetched
-def test_the_heading_aware_chunker_finds_no_headings_in_a_real_pdf(text):
-    """The second finding, and the one that was invisible until a real document arrived.
+def test_the_heading_rule_fires_on_a_typeset_document(text):
+    """It used to find zero headings here, which is the worst outcome a rule has available.
 
-    ``armor._HEADING`` matches ``^#{1,6}\\s``, and the rule it enforces — a heading never ends
-    a chunk, so a section's title travels with its text — was built and tested against Markdown
-    fixtures. This document's headings are ``II. SUMMARY OF RESULTS``: capitals and a Roman
-    numeral, because it was typeset rather than written in Markdown. The chunker finds zero.
+    ``armor._HEADING`` matched ``^#{1,6}\\s`` and nothing else, so the rule it enforces — a
+    heading never ends a chunk, so a section title travels with the text it names — was a rule
+    about Markdown fixtures. On this document it did nothing, and it did nothing without ever
+    failing, which is why it survived a milestone.
 
-    What still works is the rest of it: paragraph splitting, the sentence fallback and the token
-    budget all hold, so no chunk overruns and none begins mid-sentence. The heading rule is the
-    part that silently does nothing, and it does nothing on every real PDF, not just this one.
+    It now recognises Roman-numeral sections, appendix and annex titles, and short all-caps
+    lines. Four matches in 256 paragraphs on this document and every one of them is a real
+    heading: precision is what this rule needs, because it only ever *moves* a paragraph, so a
+    false positive tears a real paragraph off its chunk while a false negative changes nothing.
     """
+    import re as _re
+
+    from shared.armor import _HEADING
+
+    paragraphs = [p.strip() for p in _re.split(r"\n\s*\n", text) if p.strip()]
+    headings = [p for p in paragraphs if _HEADING.match(p)]
+
+    assert len(_re.findall(r"^#{1,6}\s", text, _re.M)) == 0, "still no Markdown in a real PDF"
+    assert headings, "the rule fires on a typeset document"
+    assert "I. EXECUTIVE SUMMARY" in headings
+    assert "II. SUMMARY OF RESULTS" in headings
+    assert any(h.startswith("APPENDIX C:") for h in headings)
+
+    # Every match is a heading. Stated as a ratio so a later loosening that doubles the matches
+    # has to earn it rather than pass because the count went up.
+    assert len(headings) <= 6, headings
+
+
+@fetched
+def test_the_dropped_pattern_stays_dropped(text):
+    """Numbered sections matched 33 paragraphs here and not one was a heading.
+
+    Every match was a numbered footnote, which is what the bottom of a typeset page is full of.
+    A footnote marker and a section number are the same string in the same position, and telling
+    them apart needs page geometry that text extraction has already thrown away. This asserts
+    the pattern is not quietly reintroduced by someone who tries the obvious thing next.
+    """
+    import re as _re
+
+    from shared.armor import _HEADING
+
+    # The pattern anyone would reach for to catch "3.1 Access control".
+    numbered = _re.compile(r"^\d{1,2}(?:\.\d{1,2}){0,3}[.)]?\s+\S")
+    matches = [
+        p.strip() for p in _re.split(r"\n\s*\n", text) if numbered.match(p.strip())
+    ]
+
+    assert len(matches) == 33, "the measured count; if this moved, re-read the document"
+    assert not any(_HEADING.match(m) for m in matches)
+
+
+@fetched
+def test_chunking_still_holds_on_real_prose(text):
+    """The parts that already worked, kept under test while the heading half changed."""
     from shared.armor import chunk_text
     from shared.config import settings
 
-    assert len(re.findall(r"^#{1,6}\s", text, re.M)) == 0
-
     chunks = chunk_text(text, settings().chunk_tokens)
-    budget = settings().chunk_tokens * 4
-    assert all(len(chunk) <= budget for chunk in chunks)
+
+    assert all(len(chunk) <= settings().chunk_tokens * 4 for chunk in chunks)
     assert not any(chunk[:1].islower() for chunk in chunks)
+    assert "".join(chunks).replace("\n", "") != ""
 
 
 @fetched

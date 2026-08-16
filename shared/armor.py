@@ -637,7 +637,36 @@ def index_chunks(clean_ref: str, review_id: str) -> int:
     return written
 
 
-_HEADING = re.compile(r"^#{1,6}\s")
+_HEADING = re.compile(
+    r"^(?:"
+    r"#{1,6}\s"  # Markdown, which is what the synthetic packs use
+    r"|[IVXLC]{1,7}[.)]\s+\S"  # I. EXECUTIVE SUMMARY · IV) Findings
+    r"|(?:APPENDIX|ANNEX|EXHIBIT|SCHEDULE)\s+[A-Z0-9]{1,3}\b"  # APPENDIX C: ...
+    r"|[A-Z][A-Z '&/-]{4,69}$"  # PERFORMANCE AUDIT REPORT
+    r")"
+)
+"""What counts as a heading, chosen for precision rather than recall.
+
+The rule this feeds — a heading never ends a chunk, so a section title travels with the text it
+names — only ever *moves* a paragraph forward. That makes a false positive expensive and a false
+negative cheap: mistaking a footnote for a heading tears a real paragraph off the end of its
+chunk, while missing a heading leaves the chunker doing what it did before.
+
+Measured against a real 63-page typeset audit report: **4 matches out of 256 paragraphs, all
+four of them genuine headings**, and no change to any Markdown fixture in the pack.
+
+**One candidate pattern was tried and dropped.** Numbered sections — ``3.1``, ``7 ``, the
+obvious way to catch ``3.1 Access control`` — matched 33 paragraphs in that document and not one
+of them was a heading. Every single match was a numbered *footnote*, which is what the bottom of
+a typeset page is full of. It is not repairable by tightening the number format, because a
+footnote marker and a section number are the same string in the same position; distinguishing
+them needs page geometry, which text extraction has already discarded. Dropped, and recorded
+here rather than left as a heuristic that fires wrongly.
+
+Trailing all-caps lines are matched only when they carry no digits, which is what keeps
+``SEPTEMBER 27, 2024`` on a cover page from reading as a section title. It also means a heading
+like ``SECTION 3 ACCESS CONTROL`` is missed, and that is the trade taken deliberately.
+"""
 
 
 def chunk_text(text: str, chunk_tokens: int) -> list[str]:
@@ -653,7 +682,8 @@ def chunk_text(text: str, chunk_tokens: int) -> list[str]:
     is its own paragraph, so a naive split strands it at the tail of the preceding chunk and
     starts the next one mid-finding. The heading is the most searchable line in the section and
     it belongs with the text it names, so any run of trailing headings moves into the new chunk
-    instead of closing the old one.
+    instead of closing the old one. ``_HEADING`` recognises typeset headings as well as Markdown
+    ones — a rule that only fired on fixtures was worse than no rule, because it never failed.
 
     The budget is a cap rather than a target. A single paragraph longer than the budget used to
     become an oversized chunk of its own, which is how a "400-token" setting quietly produces a

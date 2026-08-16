@@ -92,18 +92,31 @@ as it is rather than asserted as it should be, because `checks.covers` does word
 this string to decide whether a report covers the service being bought — so a paraphrase is a
 real input to a real check, and this is the next thing to tighten.
 
-## 2 · The heading-aware chunker finds no headings
+## 2 · The heading-aware chunker found no headings — fixed
 
-`armor._HEADING` matches `^#{1,6}\s`. This document contains **zero** matches.
+`armor._HEADING` matched `^#{1,6}\s`. This document contains **zero** such matches.
 
 Its headings are `II. SUMMARY OF RESULTS` — capitals and a Roman numeral, because it was
-typeset rather than written in Markdown. The rule built last milestone, that a heading never
-ends a chunk so a section title travels with its text, is a rule about Markdown fixtures. On
-every real PDF it is a no-op, silently.
+typeset rather than written in Markdown. The rule it fed, that a heading never ends a chunk so a
+section title travels with its text, was a rule about Markdown fixtures. On every real PDF it
+was a no-op, and it was a no-op that never failed, which is why it survived a milestone.
 
-What does hold: 63 chunks, none over the 1,600-character budget, and **none beginning
-mid-sentence**. The paragraph splitting and the sentence fallback work on real prose. It is the
-heading half that does nothing, and it does nothing without failing.
+**Extended.** The pattern now also matches Roman-numeral sections, appendix and annex titles,
+and short all-caps lines: **4 matches in 256 paragraphs on this document, all four genuine
+headings**, and no change to any Markdown fixture in the pack.
+
+**One pattern was tried and dropped.** Numbered sections — `3.1`, `7 `, the obvious way to catch
+`3.1 Access control` — matched **33 paragraphs here and not one was a heading**. Every match was
+a numbered footnote. It is not repairable by tightening the number format: a footnote marker and
+a section number are the same string in the same position, and separating them needs page
+geometry that text extraction has already discarded. Dropped, and `test_the_dropped_pattern_
+stays_dropped` asserts it stays dropped.
+
+Tuned for precision rather than recall, because the rule only ever *moves* a paragraph forward:
+a false positive tears a real paragraph off its chunk, a false negative changes nothing.
+
+What already held, and still does: 63 chunks, none over the 1,600-character budget, and none
+beginning mid-sentence.
 
 ## 3 · The conclusion is not where an assurance report puts it
 

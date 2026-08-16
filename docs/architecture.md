@@ -64,6 +64,29 @@ A reopened review is a new linked record with `reopened_from` set. History is ne
 | L2.5 · retrieval index | the review | which passage says this? |
 | L3 · durable vendor memory | across reviews and years | what is worth knowing next time? |
 
+### Chunking, and what its heading rule does and does not catch
+
+A chunk breaks on paragraph boundaries, is capped at `CHUNK_TOKENS`, and **a heading never ends
+a chunk** — a section title is the most searchable line in its section and it travels with the
+text it names.
+
+That rule used to recognise Markdown headings only, which meant it did nothing at all on a
+typeset PDF and did nothing without ever failing. It now also matches Roman-numeral sections,
+appendix and annex titles, and short all-caps lines: four matches in 256 paragraphs on a real
+63-page audit report, all four genuine headings, and no change to any fixture.
+
+**One pattern was tried and dropped, and the limitation is real.** Numbered sections — the
+obvious way to catch `3.1 Access control` — matched 33 paragraphs in that document and not one
+was a heading. All 33 were numbered *footnotes*, which is what the bottom of a typeset page is
+full of. A footnote marker and a section number are the same string in the same position, and
+separating them needs page geometry that text extraction has already discarded. So a document
+that numbers its sections gets the old behaviour, and `SECTION 3 ACCESS CONTROL` is missed too,
+because all-caps matching excludes digits to keep a cover date from reading as a title.
+
+The rule is tuned for precision rather than recall on purpose: it only ever *moves* a paragraph
+forward, so a false positive tears a real paragraph off its chunk while a false negative changes
+nothing.
+
 **Chunking and embedding belong to the Evidence agent, not to screening.** Chunking calls
 `routing.embed`, embedding is a generative model call, and the screening identity is declared
 *never: any generative model call*. Leaving the call in the promotion path would have made the
