@@ -83,12 +83,26 @@ def test_a_rubric_that_does_not_add_up_raises(tmp_path):
     bad.write_text(
         "domains: {data_protection: 50, access_control: 30}\n"
         "penalties: {low: 2, medium: 5, high: 10}\n"
-        "contradiction_multiplier: 1.5\n"
         "modifiers: {adversarial_conduct: {penalty: 25, forces_band: escalate}}\n"
         "bands: {approve: 80, conditional: 60, escalate: 0}\n"
     )
 
     with pytest.raises(RubricError, match="sum to 80"):
+        load_rubric(bad)
+
+
+def test_a_rubric_that_reintroduces_the_multiplier_raises(tmp_path):
+    """No fact is priced twice, and the rule is enforced at load rather than remembered."""
+    bad = tmp_path / "rubric.yaml"
+    bad.write_text(
+        "domains: {data_protection: 100}\n"
+        "penalties: {low: 2, medium: 5, high: 10}\n"
+        "contradiction_multiplier: 1.5\n"
+        "modifiers: {adversarial_conduct: {penalty: 25, forces_band: escalate}}\n"
+        "bands: {approve: 80, conditional: 60, escalate: 0}\n"
+    )
+
+    with pytest.raises(RubricError, match="contradiction_multiplier"):
         load_rubric(bad)
 
 
@@ -110,8 +124,9 @@ def test_a_flawless_review_scores_full_marks_at_every_tier():
 # --- The arithmetic ------------------------------------------------------------------------------
 
 
-def test_a_contradiction_costs_more_than_the_same_gap():
-    """A claim the vendor's own evidence refutes is materially worse than the same gap."""
+def test_a_contradiction_is_not_priced_twice():
+    """The severity anchors already treat a contradicted claim as high. Charging again would
+    charge the same fact twice, and "we set it to 1.5" is not defensible under questioning."""
     rubric = load_rubric()
 
     gap = compute_score([finding("access_control", "high")], rubric, Flags())
@@ -119,8 +134,15 @@ def test_a_contradiction_costs_more_than_the_same_gap():
         [finding("access_control", "high", contradiction=True)], rubric, Flags()
     )
 
-    assert contradiction.score < gap.score
-    assert gap.score - contradiction.score == pytest.approx(10 * 0.5, abs=1)
+    assert contradiction.score == gap.score
+
+
+def test_the_contradiction_flag_survives_on_the_finding():
+    """It drives the binder, the badge and the finding text. It stopped being a score lever,
+    not a fact."""
+    flagged = finding("access_control", "high", contradiction=True)
+
+    assert flagged.contradiction is True
 
 
 def test_a_domain_never_goes_negative():
@@ -138,8 +160,41 @@ def test_an_unmapped_domain_raises_rather_than_being_ignored():
     """An ignored finding is a silently wrong number, which is the failure this design prevents."""
     rubric = load_rubric()
 
-    with pytest.raises(RubricError, match="not scored at tier"):
+    with pytest.raises(RubricError, match="not scored on this review"):
         compute_score([finding("telepathy", "high")], rubric, Flags())
+
+
+# --- What is scored is what was asked ----------------------------------------------------
+
+
+def test_an_explicit_domain_set_wins_over_the_tier_profile():
+    """A Tier 1 freight vendor is never asked about model providers, so it is never awarded
+    the ai_specific domain's ten points for not being asked."""
+    rubric = load_rubric()
+    asked = [
+        "data_protection", "access_control", "incident_response",
+        "compliance_posture", "subprocessors", "business_continuity",
+    ]
+
+    result = compute_score([], rubric, Flags(), tier=1, domains=asked)
+
+    assert "ai_specific" not in result.breakdown
+    assert result.score == 100
+
+
+def test_a_narrower_domain_set_still_renormalises_to_one_hundred():
+    rubric = load_rubric()
+
+    weights = rubric.weights_for(["data_protection", "access_control"])
+
+    assert round(sum(weights.values()), 6) == 100.0
+
+
+def test_a_domain_set_that_scores_nothing_raises():
+    rubric = load_rubric()
+
+    with pytest.raises(RubricError, match="no weighted domain"):
+        rubric.weights_for(["conduct"])
 
 
 def test_an_unknown_severity_raises():
@@ -222,6 +277,28 @@ def test_explain_renders_a_line_per_domain_plus_the_total():
 )
 def test_band_boundaries(score, band):
     assert load_rubric().band_for(score) == band
+
+
+def test_the_band_is_read_off_the_published_number():
+    """A boundary case must not turn on float representation. 60.0 printed as 60 bands as 60,
+    whether the sum of renormalised thirds landed a hair above or below it."""
+    rubric = load_rubric()
+    asked = [
+        "data_protection", "access_control", "incident_response",
+        "compliance_posture", "subprocessors", "business_continuity",
+    ]
+    findings = [
+        finding("access_control", "high", i=1),
+        finding("incident_response", "high", i=2),
+        finding("compliance_posture", "high", i=3),
+        finding("compliance_posture", "medium", i=4),
+        finding("business_continuity", "medium", i=5),
+    ]
+
+    result = compute_score(findings, rubric, Flags(), tier=1, domains=asked)
+
+    assert result.score == 60
+    assert result.band == "conditional"
 
 
 def test_the_bands_agree_with_the_rubric_file():

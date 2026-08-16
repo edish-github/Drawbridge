@@ -53,6 +53,10 @@ name invented by a model is a key nothing can recompute. Work with no name here 
 ``needs_human`` rather than given one.
 """
 
+AI_DOMAIN = "ai_specific"
+"""The rubric domain carried only by AI services. Named here as well as in the questionnaire
+generator because the plan is what decides whether it is in scope, and both read the plan."""
+
 FACT_CUSTOMER_DATA = "customer_data"
 FACT_PRODUCTION_ACCESS = "production_access"
 FACT_AI_SERVICE = "ai_service"
@@ -158,7 +162,9 @@ def generate_plan(vendor: Vendor, dossier: Dossier, ctx, *, plan_version: int = 
         else ReviewPlan.model_validate(result.parsed)
     )
 
-    plan = plan_from_output(output, plan_version=plan_version, floor=floor)
+    plan = plan_from_output(
+        output, plan_version=plan_version, floor=floor, is_ai_vendor=vendor.is_ai_vendor
+    )
     log.info(
         "planned review=%s tier=%d (floor %d, model said %d) steps=%s",
         getattr(ctx, "review_id", "?"),
@@ -170,7 +176,9 @@ def generate_plan(vendor: Vendor, dossier: Dossier, ctx, *, plan_version: int = 
     return plan
 
 
-def plan_from_output(output: ReviewPlan, *, plan_version: int, floor: int) -> Plan:
+def plan_from_output(
+    output: ReviewPlan, *, plan_version: int, floor: int, is_ai_vendor: bool = False
+) -> Plan:
     """Convert the model's planning output into the persisted plan.
 
     Raises:
@@ -201,7 +209,7 @@ def plan_from_output(output: ReviewPlan, *, plan_version: int, floor: int) -> Pl
         tier=tier,
         plan_version=plan_version,
         steps=[PlanStep(name=name, params=params_for(name, tier)) for name in steps],
-        domains=domains_for_tier(tier),
+        domains=domains_for(tier, is_ai_vendor=is_ai_vendor),
         reason=output.reason,
     )
 
@@ -278,15 +286,27 @@ def facts_from_vendor(vendor: Vendor) -> set[str]:
     return facts
 
 
-def domains_for_tier(tier: int) -> list[str]:
-    """Return the rubric domains a review of this tier covers.
+def domains_for(tier: int, *, is_ai_vendor: bool = False) -> list[str]:
+    """Return the rubric domains this review covers.
 
     Read from ``rubric.yaml`` rather than restated, so the questions asked and the domains
-    scored cannot drift apart.
+    scored cannot drift apart — the plan's domain list is what the questionnaire selects from
+    and what the Trust Score is computed out of.
+
+    ``ai_specific`` is in the Tier 1 profile and is dropped for a vendor that is not an AI
+    service. Keeping it would send a freight company six questions about model providers, and
+    then award them the domain's full weight for not answering questions nobody should have
+    asked.
     """
     rubric = yaml.safe_load(RUBRIC_PATH.read_text())
     profiles = rubric["tier_profiles"]
-    return list(profiles.get(tier) or profiles[max(profiles)])
+    domains = list(profiles.get(tier) or profiles[max(profiles)])
+
+    if not is_ai_vendor and AI_DOMAIN in domains:
+        domains.remove(AI_DOMAIN)
+    if is_ai_vendor and AI_DOMAIN not in domains:
+        domains.append(AI_DOMAIN)
+    return domains
 
 
 def default_steps(tier: int) -> list[PlanStep]:

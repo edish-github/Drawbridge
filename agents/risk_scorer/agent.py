@@ -140,15 +140,18 @@ def on_findings_ready(event: EventEnvelope, review: Review) -> None:
         findings = load_findings(review.review_id)
         rubric = load_rubric()
         flags = Flags(adversarial_conduct=adversarial_flag(review.review_id))
+        domains = scored_domains(review)
 
         try:
-            result = compute_score(findings, rubric, flags, tier=review.tier)
+            result = compute_score(
+                findings, rubric, flags, tier=review.tier, domains=domains
+            )
         except Exception as exc:
             park(review.review_id, reason="scoring_failed")
             log.error("scoring failed for review=%s: %s", review.review_id, exc)
             raise
 
-        breakdown = explain(result, rubric, tier=review.tier)
+        breakdown = explain(result, rubric, tier=review.tier, domains=domains)
         step(
             STEP_SCORE,
             ctx,
@@ -199,6 +202,23 @@ def on_findings_ready(event: EventEnvelope, review: Review) -> None:
         result.band,
         "\n".join(f"    {line}" for line in breakdown),
     )
+
+
+def scored_domains(review: Review) -> list[str] | None:
+    """Return the domain set this review's plan covered, or ``None`` to fall back to the tier.
+
+    What is scored is what was asked. Reading it from the checkpointed plan rather than
+    recomputing it from the tier also means a review re-tiered mid-flight is scored against the
+    domains its final plan sent, not against the profile the tier nominally implies.
+
+    ``None`` when no plan is recorded — a filler or hand-built review — in which case the tier
+    profile is the only answer available and the rubric supplies it.
+    """
+    from agents.orchestrator.agent import STEP_PLAN
+    from shared.checkpoint import step_result
+
+    plan = step_result(review.review_id, STEP_PLAN) or {}
+    return list(plan.get("domains") or []) or None
 
 
 def load_findings(review_id: str) -> list[Finding]:

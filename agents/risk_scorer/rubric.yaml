@@ -25,9 +25,13 @@ penalties:
   medium: 5
   high: 10
 
-# A contradiction is a claim the vendor's own evidence refutes, which is materially worse
-# than the same gap found with no claim attached.
-contradiction_multiplier: 1.5
+# No contradiction multiplier, and its absence is the rule rather than an omission: no fact is
+# priced twice. The severity anchors already define high as "a control the vendor claims is in
+# place is contradicted by their own evidence", so a contradiction has been priced the moment
+# the severity was assigned. Multiplying again charges the same fact a second time.
+#
+# The contradiction flag survives on the finding. It drives the binder, the badge and the
+# finding text. It is not a score lever.
 
 modifiers:
   # Attempted manipulation of the review process. Applied after the domain arithmetic and
