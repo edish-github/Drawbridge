@@ -164,6 +164,8 @@ def extract_chain(
         save_subprocessor(vendor_id, sub)
 
     findings = diff(review_id, vendor_id, resolved, register, evidence_ref=refs[0])
+    if register:
+        announce_gap(review_id, vendor_id, resolved)
 
     log.info(
         "resolved %d subprocessor(s) for vendor=%s against a register of %d: %d finding(s)",
@@ -353,6 +355,50 @@ def _residency(
             evidence_ref=ref,
         )
     ]
+
+
+def announce_gap(review_id: str, vendor_id: str, chain: list[Subprocessor]) -> list[str]:
+    """Put an unreviewed fourth party on the review timeline. Returns the names announced.
+
+    The finding already exists and already costs the vendor points; this is the same fact aimed
+    at a person rather than at the arithmetic, because *a company you have never heard of is
+    holding your customers' data* is the sentence somebody needs to read before the gate, not
+    after it in a table of six.
+
+    A card rather than a park, deliberately. The Watchdog's rule applies here too: this never
+    stops a review. It is one line naming the company, what it receives and the fact that no
+    review of it exists, which is the whole of what a person can act on.
+    """
+    from shared.state import raise_card
+
+    unknown = [s for s in chain if s.processes_customer_data and not s.known_to_org]
+    if not unknown:
+        return []
+
+    vendor = _vendor_name(vendor_id)
+    for sub in unknown:
+        where = f" in {sub.jurisdiction}" if sub.jurisdiction else ""
+        raise_card(
+            review_id,
+            kind="fourth_party_gap",
+            line=(
+                f"{sub.name} receives customer data through {vendor}{where} — "
+                f"{sub.purpose or 'purpose not stated'} — and this organisation has never "
+                "reviewed it. It is not on the approved-vendor register."
+            ),
+            subprocessor=sub.name,
+            vendor=vendor,
+            purpose=sub.purpose,
+            jurisdiction=sub.jurisdiction,
+        )
+
+    log.info("announced %d unreviewed fourth part(ies) on review=%s", len(unknown), review_id)
+    return [s.name for s in unknown]
+
+
+def _vendor_name(vendor_id: str) -> str:
+    raw = firestore_client().collection("vendors").document(vendor_id).get().to_dict() or {}
+    return str(raw.get("name") or vendor_id)
 
 
 def declared_residency(vendor_id: str) -> list[str]:

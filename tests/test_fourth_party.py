@@ -375,7 +375,81 @@ def test_the_binder_builds_the_chain_without_importing_the_router():
     assert not any(name.startswith("agents.") for name in imported), sorted(imported)
 
 
+# --- The beat -----------------------------------------------------------------------------------
+
+
+@emulator_required
+def test_an_unreviewed_fourth_party_is_announced_on_the_timeline(review_id, db):
+    """The finding is in the table. This is the same fact aimed at a person, before the gate."""
+    from agents.evidence.subprocessors import announce_gap
+
+    db.collection("vendors").document("v").set({"name": "DataDynamo Logistics"})
+    announced = announce_gap(
+        review_id,
+        "v",
+        [sub(name="Sendline Notifications", purpose="Delivery notifications", jurisdiction="EU")],
+    )
+
+    assert announced == ["Sendline Notifications"]
+    card = _gap_cards(db, review_id)[0]
+    assert "Sendline Notifications" in card["line"]
+    assert "DataDynamo Logistics" in card["line"]
+    assert "Delivery notifications" in card["line"]
+    assert "never reviewed it" in card["line"]
+
+
+@emulator_required
+def test_a_reviewed_fourth_party_raises_no_card(review_id, db):
+    """A card per subprocessor would make the one that matters unreadable."""
+    from agents.evidence.subprocessors import announce_gap
+
+    known = sub(name="Aurelius Cloud Services", known_to_org=True, register_status=STATUS_CURRENT)
+    assert announce_gap(review_id, "v", [known]) == []
+    assert _gap_cards(db, review_id) == []
+
+
+@emulator_required
+def test_a_fourth_party_that_receives_no_customer_data_raises_no_card(review_id, db):
+    """Pathview Telemetry is absent from the register too, and receives aggregate counters."""
+    from agents.evidence.subprocessors import announce_gap
+
+    quiet = sub(name="Pathview Telemetry", processes_customer_data=False)
+    assert announce_gap(review_id, "v", [quiet]) == []
+    assert _gap_cards(db, review_id) == []
+
+
+def test_the_beat_is_skipped_for_a_vendor_whose_chain_is_clean():
+    """CleanCloud's subprocessors are all on the register, so requiring the beat of it would
+    be requiring the fleet to find a problem that is not there."""
+    from scenarios.demo_runner import beats_for
+
+    assert "fourth_party_gap" in beats_for("datadynamo")
+    assert "fourth_party_gap" not in beats_for("cleancloud")
+
+
+def test_the_beat_fires_between_the_findings_and_the_score():
+    """Before the gate, not after it. A person reads the timeline in order."""
+    from scenarios.demo_runner import BEATS
+
+    order = list(BEATS)
+    assert order.index("findings_ready") < order.index("fourth_party_gap") < order.index("scored")
+
+
 # --- fixtures ---------------------------------------------------------------------------------
+
+
+def _gap_cards(db, review_id: str) -> list[dict]:
+    from google.cloud.firestore_v1 import FieldFilter
+
+    from shared.state import COLLECTION_DASHBOARD
+
+    return [
+        d.to_dict()
+        for d in db.collection(COLLECTION_DASHBOARD)
+        .where(filter=FieldFilter("review_id", "==", review_id))
+        .where(filter=FieldFilter("kind", "==", "fourth_party_gap"))
+        .stream()
+    ]
 
 
 def _ctx(review_id: str) -> AgentContext:

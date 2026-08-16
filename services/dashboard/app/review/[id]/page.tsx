@@ -265,7 +265,9 @@ function Entry({ entry }: { entry: Doc }) {
           ? `Monitoring signal for review: ${entry.title}`
           : kind === "prior_review_recalled"
             ? `Opened knowing: ${entry.line}`
-            : transitionOf(entry));
+            : kind === "fourth_party_gap"
+              ? `Unreviewed fourth party: ${entry.subprocessor}`
+              : transitionOf(entry));
 
   return (
     <div className="entry" data-kind={kind}>

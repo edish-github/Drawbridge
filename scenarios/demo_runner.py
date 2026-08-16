@@ -60,6 +60,11 @@ BEATS = (
     "vague_answers_re_asked",
     "evidence_screened",
     "findings_ready",
+    # The one place an agent queries an internal system rather than reading a document. The
+    # finding is already in the table by now; this is the same fact aimed at a person, because
+    # a company nobody here has reviewed is holding your customers' data and that belongs on
+    # the timeline before the gate rather than in row four of a findings list after it.
+    "fourth_party_gap",
     "scored",
     "decision_gate_parked",
     "decided",
@@ -96,6 +101,8 @@ def beats_for(vendor: str) -> list[str]:
         skip |= {"retier", "additional_questions_sent"}
     if not int((expected.get("followups") or {}).get("expected_count", 0)):
         skip.add("vague_answers_re_asked")
+    if not (expected.get("subprocessors") or {}).get("unknown_to_register"):
+        skip.add("fourth_party_gap")
     return [beat for beat in BEATS if beat not in skip]
 
 
@@ -313,6 +320,12 @@ def to_a_decision(demo: Demo, *, conditions: list[str] | None = None) -> list[st
     demo.drain(batches=3)
     demo.require("findings_ready", finding_count(demo.review_id) > 0)
 
+    gaps = gap_cards(demo.review_id)
+    if "fourth_party_gap" in beats_for(vendor):
+        demo.require("fourth_party_gap", bool(gaps))
+        for card in gaps:
+            log.info("fourth party · %s", card["line"])
+
     # --- score and the decision gate ---------------------------------------------------------
     demo.drain(batches=3)
     review = demo.review()
@@ -468,6 +481,22 @@ def inbox_count(review_id: str, kind: str | None = None) -> int:
 
 def finding_count(review_id: str) -> int:
     return _count("findings", review_id)
+
+
+def gap_cards(review_id: str) -> list[dict]:
+    """Return the fourth-party gap cards this review raised, ordered by company name."""
+    from google.cloud.firestore_v1 import FieldFilter
+
+    from shared.state import COLLECTION_DASHBOARD
+
+    docs = (
+        firestore_client()
+        .collection(COLLECTION_DASHBOARD)
+        .where(filter=FieldFilter("review_id", "==", review_id))
+        .where(filter=FieldFilter("kind", "==", "fourth_party_gap"))
+        .stream()
+    )
+    return sorted((d.to_dict() or {} for d in docs), key=lambda c: str(c.get("subprocessor")))
 
 
 def answered_count(review_id: str) -> int:
