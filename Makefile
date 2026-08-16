@@ -1,5 +1,5 @@
 .PHONY: help bootstrap emulators emulators-stop seed run-local dev-ui open-review deploy demo \
-        teardown test lint probe
+        demo-fixtures teardown test lint probe
 
 PYTHON ?= python
 
@@ -20,7 +20,7 @@ emulators-stop: ## stop the emulators
 		rm -f $$p; \
 	done
 
-seed: emulators ## load synthetic vendors into Firestore + Storage
+seed: emulators ## load synthetic vendors into Firestore and object storage
 	$(PYTHON) -m scenarios.seed
 
 run-local: emulators ## run the worker: pull events, dispatch to agents, acknowledge
@@ -35,8 +35,11 @@ open-review:    ## open a review for a synthetic vendor (VENDOR=nimbuswrite)
 deploy:         ## build + push + deploy agents and services
 	./infra/deploy/deploy_all.sh
 
-demo:           ## run the scripted end-to-end demo scenario
-	$(PYTHON) -m scenarios.demo_runner --vendor nimbuswrite --compress 240
+demo:           ## run the end-to-end scenario against the live models (needs quota)
+	$(PYTHON) -m scenarios.demo_runner --vendor $(or $(VENDOR),datadynamo)
+
+demo-fixtures:  ## run the same scenario with fixture answers: free, deterministic, no model call
+	$(PYTHON) -m scenarios.demo_runner --vendor $(or $(VENDOR),datadynamo) --fixtures-only
 
 teardown:       ## delete everything except the dashboard service
 	./infra/teardown.sh

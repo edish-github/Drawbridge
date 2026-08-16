@@ -106,9 +106,23 @@ def run_plan_ready(review_id: str) -> None:
 
 
 def approve_contact(review_id: str) -> str:
+    """Approve first contact and let the Orchestrator release the gate.
+
+    Two steps because they are two responsibilities: the approvals path records the decision and
+    publishes, and the Orchestrator performs the transition. A test that wrote the state itself
+    would pass while the release path was broken.
+    """
+    from agents.orchestrator.agent import handle_event
     from scripts.issue_token import issue
 
-    return issue(review_id, scope="contact", identity="test-operator", ttl_minutes=10)
+    token = issue(review_id, scope="contact", identity="test-operator", ttl_minutes=10)
+
+    review = load_review(review_id)
+    handle_event(
+        envelope(review_id, "review.approved", {"scope": "contact", "identity": "test-operator"}),
+        review,
+    )
+    return token
 
 
 # --- Intake ----------------------------------------------------------------------------------
@@ -201,9 +215,15 @@ def test_the_refusal_is_logged_as_a_named_policy(opened, db):
         .stream()
     ]
 
-    assert blocks, "a policy refusal must leave a dashboard event"
-    assert blocks[0]["policy"] == "P1"
-    assert blocks[0]["line"].startswith("P1 REJECTED")
+    # Two cards land for one refusal and they are different things: the policy block naming
+    # what refused, and the gate card an operator acts on. Both belong on the dashboard.
+    policy_blocks = [b for b in blocks if b.get("kind") == "policy_block"]
+    gate_cards = [b for b in blocks if b.get("kind") == "gate"]
+
+    assert policy_blocks, "a policy refusal must leave a dashboard event"
+    assert policy_blocks[0]["policy"] == "P1"
+    assert policy_blocks[0]["line"].startswith("P1 REJECTED")
+    assert gate_cards and gate_cards[0]["gate_scope"] == "contact"
 
 
 @emulator_required
