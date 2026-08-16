@@ -80,10 +80,17 @@ def write_memo(
     the memo was ever written. It lands with the real service, and it is the control that
     assumes every earlier one failed.
 
+    Every source screened on the review is named on this call, because the memo is written from
+    findings drawn from all of them. That is where P2's sharpest rule lands: a sanitised
+    document is admissible to the Evidence agent and inadmissible here, so a vendor who planted
+    something cannot have the resulting document quoted into the artefact a CISO acts on.
+
     Raises:
         Exception: a generation failure propagates and the caller parks the review. A score
             with no reasoning behind it is not something to approve against.
+        PolicyViolation: naming P2, when any source on the review is inadmissible to the memo.
     """
+    from shared.armor import stamps_for
     from shared.routing import generate
 
     prompt = MEMO_PROMPT.format(
@@ -93,7 +100,7 @@ def write_memo(
         dossier=_render_dossier(dossier),
     )
 
-    result = generate("risk_memo", prompt, ctx)
+    result = generate("risk_memo", prompt, ctx, source_stamps=stamps_for(review_id))
     text = result.text.strip()
     if not text:
         raise ValueError(f"the memo call returned nothing for review {review_id}")

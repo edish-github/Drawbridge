@@ -1,5 +1,5 @@
 .PHONY: help bootstrap emulators emulators-stop seed run-local dev-ui open-review deploy demo \
-        demo-fixtures teardown test lint probe
+        demo-fixtures binder dashboard teardown test lint probe
 
 PYTHON ?= python
 
@@ -35,11 +35,21 @@ open-review:    ## open a review for a synthetic vendor (VENDOR=nimbuswrite)
 deploy:         ## build + push + deploy agents and services
 	./infra/deploy/deploy_all.sh
 
+# Both demo targets run on seeded clean-bucket fixtures, which no detector inspected. P2
+# refuses them by default and that refusal is correct, so the demo declares what it is running
+# on rather than the policy being softened to let it through. Every review produced this way
+# carries unscreened_fixtures=true and the binder prints it on the cover.
+UNSCREENED = DRAWBRIDGE_ALLOW_UNSCREENED=1
+
 demo:           ## run the end-to-end scenario against the live models (needs quota)
-	$(PYTHON) -m scenarios.demo_runner --vendor $(or $(VENDOR),datadynamo)
+	$(UNSCREENED) $(PYTHON) -m scenarios.demo_runner --vendor $(or $(VENDOR),datadynamo)
 
 demo-fixtures:  ## run the same scenario with fixture answers: free, deterministic, no model call
-	$(PYTHON) -m scenarios.demo_runner --vendor $(or $(VENDOR),datadynamo) --fixtures-only
+	$(UNSCREENED) $(PYTHON) -m scenarios.demo_runner --vendor $(or $(VENDOR),datadynamo) \
+		--fixtures-only
+
+binder:         ## render a review's audit binder to HTML (REVIEW=<id>)
+	$(PYTHON) -m services.binder.render --review-id $(REVIEW)
 
 teardown:       ## delete everything except the dashboard service
 	./infra/teardown.sh

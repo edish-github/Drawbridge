@@ -26,6 +26,7 @@ from datetime import date
 
 from pydantic import BaseModel, Field
 
+from shared.armor import stamps_for
 from shared.routing import generate
 
 log = logging.getLogger("drawbridge.extractors")
@@ -131,6 +132,7 @@ def extract_controls(doc_ref: str, review_id: str, ctx) -> list[ControlClaim]:
         CONTROLS_PROMPT.format(name=name, body=body[:MAX_DOCUMENT_CHARS]),
         ctx,
         response_schema=_ExtractedControls,
+        source_stamps=stamps_for(review_id, [doc_ref]),
     )
     return _validated(result.parsed, _ExtractedControls).controls
 
@@ -147,6 +149,7 @@ def extract_document_facts(doc_ref: str, review_id: str, ctx) -> DocumentFacts:
         FACTS_PROMPT.format(name=name, body=body[:MAX_DOCUMENT_CHARS]),
         ctx,
         response_schema=_ExtractedFacts,
+        source_stamps=stamps_for(review_id, [doc_ref]),
     )
     facts = _validated(result.parsed, _ExtractedFacts)
 

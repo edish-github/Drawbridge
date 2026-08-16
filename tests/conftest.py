@@ -47,6 +47,10 @@ def _local_mode_env():
     os.environ.setdefault("GEMINI_API_KEY", "test-key-not-used")
     os.environ.setdefault("FIRESTORE_EMULATOR_HOST", FIRESTORE_HOST)
     os.environ.setdefault("PUBSUB_EMULATOR_HOST", PUBSUB_HOST)
+    # The suite runs on seeded fixtures, which P2 correctly refuses. Set rather than defaulted,
+    # so the value is the same whatever the developer's shell holds. Tests that exercise the
+    # refusal itself unset it for their own duration.
+    os.environ["DRAWBRIDGE_ALLOW_UNSCREENED"] = "1"
     yield
     # The console span exporter runs on a background thread. Without an explicit shutdown it
     # flushes after pytest has closed stdout and prints a traceback that reads like a failure.

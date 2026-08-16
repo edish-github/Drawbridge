@@ -124,8 +124,35 @@ def run(vendor: str, *, compress: int = 1, fixtures_only: bool = False) -> list[
     return _run(vendor)
 
 
+def announce_fixtures() -> None:
+    """Print the banner every fixture-built run carries, or explain the refusal that is coming.
+
+    This run feeds a model documents that no detector inspected. P2 refuses them unless the
+    allowance is set, and the allowance exists so the artefact declares what it is rather than
+    so the policy is quieter. Saying it here, once, before anything happens, means an operator
+    watching a terminal knows what they are looking at without reading a log line.
+    """
+    from shared.gateway import ALLOW_UNSCREENED_ENV, unscreened_fixtures_allowed
+
+    if unscreened_fixtures_allowed():
+        print(
+            "\n"
+            "  UNSCREENED FIXTURES\n"
+            "  This run feeds the models seeded documents that no detector inspected. Every\n"
+            "  review it produces is marked unscreened_fixtures=true, and its binder says so\n"
+            f"  on the cover. Set by {ALLOW_UNSCREENED_ENV}=1.\n"
+        )
+        return
+
+    print(
+        f"\n  {ALLOW_UNSCREENED_ENV} is not set. P2 will refuse the seeded evidence, which is\n"
+        "  the policy working. Run this through `make demo-fixtures`, which sets it.\n"
+    )
+
+
 def _run(vendor: str) -> list[str]:
     """The scripted run itself. Identical whether the answers come from a model or a fixture."""
+    announce_fixtures()
     demo = Demo(vendor)
     profile = load_vendor(vendor)["profile"]
 

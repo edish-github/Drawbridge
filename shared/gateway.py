@@ -28,8 +28,10 @@ is degraded to a warning and no call proceeds past a failed check. A tool that i
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -49,8 +51,12 @@ MODEL_INPUT_TOOLS: frozenset[str] = frozenset(
 """Tool names whose arguments reach a generative model. P2 applies to every one of them."""
 
 DEEP_MODEL_TOOLS: frozenset[str] = frozenset({"risk_memo"})
-"""Tools where sanitised content is inadmissible. A sanitised document tried something, and the
-memo is the artefact a human acts on.
+"""Destinations where sanitised content is inadmissible. A sanitised document tried something,
+and the memo is the artefact a human acts on.
+
+Read by both gates: ``call_tool`` names an effect and ``routing.generate`` names a task, and
+the memo is the one destination that appears under both names. One list, so the rule cannot be
+true at one gate and false at the other.
 """
 
 FEED_ALLOWLIST: frozenset[str] = frozenset(
@@ -77,6 +83,16 @@ at deploy time.
 
 TOOL_REGISTRY: dict[str, Callable[..., Any]] = {}
 """Name to callable. The only dispatch table in the fleet."""
+
+ALLOW_UNSCREENED_ENV = "DRAWBRIDGE_ALLOW_UNSCREENED"
+"""The environment variable that admits declared-untrusted fixtures past P2, in local mode only.
+
+Named here because P2 lives here. See ``unscreened_fixtures_allowed``.
+"""
+
+_DECLARED: set[str] = set()
+"""Reviews already marked as fixture-built in this process, so the banner is printed once each
+rather than once per model call."""
 
 
 class PolicyViolation(Exception):
@@ -281,19 +297,72 @@ def issue_approval_token(review_id: str, scope: str, identity: str) -> str:
 def verify_stamp(stamp: str | None) -> ScreenResult | None:
     """Verify a clean-stamp signature and return the claim it carries.
 
+    The local tag is checked rather than merely parsed: the digest is recomputed over the
+    payload and a mismatch returns ``None``. A stamp whose body could be edited after signing
+    would make P2 a check that content *carries* a verdict rather than a check on *what the
+    verdict said*, which is the distinction the whole policy rests on.
+
     Returns:
-        The parsed stamp, or ``None`` when the stamp is absent, malformed or fails verification.
-        ``None`` is a P2 block, not an exception.
+        The parsed stamp, or ``None`` when the stamp is absent, malformed, altered or fails
+        verification. ``None`` is a P2 block, not an exception.
     """
     if not stamp:
         return None
     try:
         if stamp.startswith("local-tag:"):
-            _, _digest, payload = stamp.split(":", 2)
+            _, digest, payload = stamp.split(":", 2)
+            if hashlib.sha256(payload.encode("utf-8")).hexdigest() != digest:
+                log.warning("P2 stamp digest mismatch; the claim does not match its tag")
+                return None
             return ScreenResult.model_validate(json.loads(payload))
     except (ValueError, json.JSONDecodeError):
         return None
     return None
+
+
+def unscreened_fixtures_allowed() -> bool:
+    """Return whether unscreened local fixtures may reach a model on this process.
+
+    Local mode has no Model Armor, so seeded documents carry a ``local-seed`` stamp that P2
+    correctly refuses. ``DRAWBRIDGE_ALLOW_UNSCREENED=1`` admits them — and only them: a source
+    with no stamp at all is refused whatever this returns, because the allowance covers content
+    that declared what it is, not content nobody screened and nobody labelled.
+
+    **Cloud mode ignores the variable entirely.** The check is on the mode first and the
+    environment second, so setting it on a deployed service does nothing at all. An escape
+    hatch that could be opened in production by an environment variable is not an escape hatch,
+    it is a switch for turning the control off.
+    """
+    from shared.config import settings
+
+    return settings().is_local and os.environ.get(ALLOW_UNSCREENED_ENV) == "1"
+
+
+def declare_unscreened(review_id: str | None) -> None:
+    """Mark a review as built on unscreened fixtures, and say so once, loudly.
+
+    The flag travels with the review onto the dashboard and onto the binder's cover. A fixture
+    run that produced an artefact indistinguishable from a real one would be the single most
+    damaging thing in this repository, so the artefact declares what it is — the same
+    discipline as ``local-stub`` and ``local-seed``, one level up.
+    """
+    if not review_id or review_id in _DECLARED:
+        return
+    _DECLARED.add(review_id)
+
+    log.warning(
+        "UNSCREENED FIXTURES — review=%s is built on seeded content that no detector "
+        "inspected. %s is set. This is not a screening verdict and the binder says so on its "
+        "cover.",
+        review_id,
+        ALLOW_UNSCREENED_ENV,
+    )
+    try:
+        firestore_client().collection("reviews").document(review_id).set(
+            {"unscreened_fixtures": True}, merge=True
+        )
+    except Exception as exc:  # noqa: BLE001 — the declaration must not break the run it labels
+        log.error("could not record the unscreened-fixtures flag on %s: %s", review_id, exc)
 
 
 def admissible(stamp: ScreenResult, tool_name: str) -> bool:
@@ -360,16 +429,18 @@ def enforce_limits(ctx) -> None:
 def log_policy_block(policy: str, ctx, **attrs) -> None:
     """Write the structured log line and dashboard event for a policy decision.
 
-    The line names the policy, the template and the filter that fired::
+    The line names the policy, what refused and why::
 
         P2 REJECTED · drawbridge-untrusted v3 · pi_and_jailbreak MATCH_FOUND · ref=...
+        P2 REJECTED · local-seed v0 · verdict_not_trustworthy · task=cross_examine
 
-    ``blocked`` reads as a mock; the line above reads as a product. Never raises: a failure to
+    ``blocked`` reads as a mock; the lines above read as a product. Never raises: a failure to
     log must not swallow the block it was describing.
     """
     template = attrs.get("template")
     version = attrs.get("template_version")
     filter_name = attrs.get("filter_name")
+    detail = attrs.get("detail")
     ref = attrs.get("ref") or attrs.get("target") or ""
 
     parts = [f"{policy} REJECTED"]
@@ -377,6 +448,8 @@ def log_policy_block(policy: str, ctx, **attrs) -> None:
         parts.append(f"{template} v{version}" if version else str(template))
     if filter_name:
         parts.append(f"{filter_name} MATCH_FOUND")
+    if detail:
+        parts.append(str(detail))
     if ref:
         parts.append(f"ref={ref}")
     line = " · ".join(parts)

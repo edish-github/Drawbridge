@@ -55,6 +55,7 @@ from shared.armor import (
     ScreenResult,
     index_chunks,
     record_screening,
+    sign_stamp,
 )
 from shared.clients import firestore_client
 from shared.config import settings
@@ -176,7 +177,16 @@ def seed_clean_evidence(review_id: str, slug: str) -> list[str]:
         clean_ref = storage.ref_for(cfg.bucket_clean, f"{review_id}/{path.stem}.txt")
         storage.write_object(clean_ref, text)
 
-        record_screening(review_id, _seed_stamp(clean_ref))
+        # The sidecar too, so the clean bucket is self-describing here exactly as it is on the
+        # real promotion path. An object with no stamp beside it would be the one thing in the
+        # bucket that could not say how it got there.
+        stamp = _seed_stamp(clean_ref)
+        storage.write_object(
+            storage.ref_for(cfg.bucket_clean, f"{review_id}/{path.stem}.stamp"),
+            sign_stamp(stamp.model_dump(mode="json")),
+            content_type="application/json",
+        )
+        record_screening(review_id, stamp)
         index_chunks(clean_ref, review_id)
         refs.append(clean_ref)
 

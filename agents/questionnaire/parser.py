@@ -95,14 +95,21 @@ def parse_reply(body: str, review_id: str, ctx, *, source_msg: str = "") -> list
     belong together: a caller that forgot to apply it would record an evasive answer as an
     answer, which is precisely the failure the confidence score exists to catch.
 
+    The reply's own screening record is the source stamp. An injection in an email body is the
+    likelier vector than one in a PDF, so this is the P2 check that matters most often.
+
     Raises:
         ValueError: when the model's output does not validate. Nothing is merged.
+        PolicyViolation: naming P2, when the reply has no admissible screening verdict.
     """
+    from shared.armor import stamps_for
+
     result = generate(
         "parse_reply",
         PARSE_PROMPT.format(questions=_outstanding(review_id), body=body),
         ctx,
         response_schema=_ParsedReply,
+        source_stamps=stamps_for(review_id, [f"reply:{source_msg}"]),
     )
     parsed = (
         result.parsed

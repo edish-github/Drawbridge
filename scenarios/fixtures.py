@@ -15,6 +15,13 @@ is the single chokepoint every model call already goes through, so a code path t
 model another way would fail loudly here instead of quietly making a live call in a run
 advertised as free.
 
+**P2 still runs.** The responder applies the same policy the real router applies, on the same
+stamps, before answering anything. A fixture mode that skipped the gate would switch off the
+largest security control in the system for every demo run, every test and every CI pass — and
+the seeded documents it feeds on are exactly the content P2 is supposed to refuse, so the
+refusal is not incidental here. Running the fixtures therefore requires
+``DRAWBRIDGE_ALLOW_UNSCREENED=1``, and every review produced under it carries the fact.
+
 The canned answers are **read from the fixtures**, not written here: the reply text comes from
 ``questionnaire_answers.json``, the document facts are parsed out of the evidence documents, and
 the cross-examination findings come from ``expected.json``. A fixture mode with its own
@@ -34,7 +41,7 @@ from contextlib import contextmanager
 from datetime import date
 
 from scenarios.seed import load_vendor
-from shared.routing import ModelResult
+from shared.routing import ModelResult, enforce_p2
 
 log = logging.getLogger("drawbridge.fixtures")
 
@@ -134,7 +141,14 @@ class FixtureResponder:
         self.pack = load_vendor(vendor)
         self.calls: list[str] = []
 
-    def __call__(self, task, prompt, ctx, *, response_schema=None, temperature=0.0):
+    def __call__(
+        self, task, prompt, ctx, *, response_schema=None, temperature=0.0, source_stamps=None
+    ):
+        # P2 first, exactly as ``routing.generate`` applies it. A stand-in for the model gate
+        # that skipped the gate would make every fixtures run a run in which the largest
+        # security control in the system was switched off — and the demo, the tests and CI all
+        # go through here. The refusals are the same refusals; only the answer is substituted.
+        enforce_p2(task, ctx, source_stamps)
         self.calls.append(task)
         handler = {
             "plan_review": self._plan,

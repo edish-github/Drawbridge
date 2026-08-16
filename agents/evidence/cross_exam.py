@@ -15,6 +15,10 @@ passage. The Risk Scorer makes no model call at all: it is arithmetic over these
 That division is the strongest architectural claim in the project and it lives or dies in
 this file.
 
+Every call names the documents its passages came from, so P2 decides whether they may reach the
+deep model at all. That check is in ``routing.generate`` rather than here — this file is one of
+the callers it governs, not the place the rule lives.
+
 Failure semantics: a finding citing a chunk id that does not resolve is rejected rather than
 written — an unverifiable citation is worse than no citation, because the binder prints it. A
 model call failure leaves the claim unreconciled and retries; no finding is written with a
@@ -31,6 +35,7 @@ from collections.abc import Iterator
 from pydantic import BaseModel, Field
 
 from agents.evidence.retrieval import all_chunks, resolve_chunk, retrieve_for_claim
+from shared.armor import stamps_for
 from shared.domain import EvidenceChunk, Finding, FindingDraft
 from shared.routing import generate
 
@@ -143,7 +148,16 @@ def reconcile_claim(ctx, review_id: str, claim: Claim) -> Finding | None:
     if degraded:
         prompt = f"{DEGRADED_NOTE}\n{prompt}"
 
-    result = generate("cross_examine", prompt, ctx, response_schema=ReconciledClaim)
+    # The sources are the documents the retrieved passages came from, named one by one rather
+    # than as "everything screened on this review": P2 should refuse a prompt built from an
+    # inadmissible document even when some other document on the same review screened clean.
+    result = generate(
+        "cross_examine",
+        prompt,
+        ctx,
+        response_schema=ReconciledClaim,
+        source_stamps=stamps_for(review_id, sorted({chunk.doc_ref for chunk in passages})),
+    )
     reconciled = (
         result.parsed
         if isinstance(result.parsed, ReconciledClaim)

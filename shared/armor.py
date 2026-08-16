@@ -492,6 +492,75 @@ def sign_stamp(claim: dict) -> str:
     return f"local-tag:{digest}:{payload}"
 
 
+def stamp_for(review_id: str, ref: str) -> str | None:
+    """Return the signed clean-stamp covering ``ref``, or ``None`` when nothing screened it.
+
+    This is what a caller passes to ``routing.generate`` so P2 can decide whether the content
+    may reach a model. The stamp is rebuilt from the screening ledger rather than read from the
+    clean bucket's sidecar: the ledger is the record the binder is rendered from, and a policy
+    that consulted a different artefact than the audit trail could pass on one and fail on the
+    other.
+
+    A reference is matched exactly first, then by document stem. Promotion writes the clean
+    object as ``{review}/{stem}.txt`` from a quarantine object named ``{vendor}/{stem}.pdf``,
+    and the screening record names the quarantine reference, so the caller holding a clean
+    reference has a different string for the same document. Matching the stem is what closes
+    that gap without either side having to know the other's naming.
+
+    Returns ``None`` rather than raising: an unscreened source is a policy outcome, and the
+    single place it is logged is the P2 block that follows.
+    """
+    from google.cloud.firestore_v1 import FieldFilter
+
+    records = [
+        d.to_dict() or {}
+        for d in firestore_client()
+        .collection(COLLECTION_SCREENINGS)
+        .where(filter=FieldFilter("review_id", "==", review_id))
+        .stream()
+    ]
+
+    wanted = _stem(ref)
+    match = next(
+        (r for r in records if r.get("origin_ref") == ref),
+        next((r for r in records if _stem(str(r.get("origin_ref", ""))) == wanted), None),
+    )
+    if match is None:
+        return None
+
+    match.pop("review_id", None)
+    return sign_stamp(match)
+
+
+def stamps_for(review_id: str, refs: list[str] | None = None) -> list[str]:
+    """Return the signed stamps for ``refs``, or for every source screened on this review.
+
+    The no-argument form is what the memo call uses: its prompt is built from findings drawn
+    from every document and every reply, so the sources it must account for are all of them.
+    """
+    if refs is not None:
+        return [s for s in (stamp_for(review_id, ref) for ref in refs) if s]
+
+    from google.cloud.firestore_v1 import FieldFilter
+
+    out: list[str] = []
+    for doc in (
+        firestore_client()
+        .collection(COLLECTION_SCREENINGS)
+        .where(filter=FieldFilter("review_id", "==", review_id))
+        .stream()
+    ):
+        record = doc.to_dict() or {}
+        record.pop("review_id", None)
+        out.append(sign_stamp(record))
+    return out
+
+
+def _stem(ref: str) -> str:
+    """Return a reference's bare document name without directory or extension."""
+    return Path(ref.rsplit("/", 1)[-1]).stem
+
+
 CHUNK_COLLECTION = "evidence_chunks"
 CHARS_PER_TOKEN = 4
 """Characters per token, for sizing chunks without tokenising.

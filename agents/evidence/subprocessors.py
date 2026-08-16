@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 
 from agents.evidence.checks import rule_finding
 from agents.evidence.extractors import MAX_DOCUMENT_CHARS, read_clean_document
+from shared.armor import stamps_for
 from shared.clients import firestore_client
 from shared.domain import Finding, Subprocessor
 from shared.routing import generate
@@ -86,6 +87,7 @@ def extract_chain(ctx, review_id: str, vendor_id: str, doc_refs: list[str]) -> l
         SUBPROCESSOR_PROMPT.format(passages="\n\n".join(passages)),
         ctx,
         response_schema=_ExtractedChain,
+        source_stamps=stamps_for(review_id, refs),
     )
     chain = (
         result.parsed
