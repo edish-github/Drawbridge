@@ -174,7 +174,26 @@ def test_every_positive_case_says_what_a_miss_would_cost():
 def test_the_techniques_are_distinct():
     """Six runs of one technique is one measurement repeated, not a corpus."""
     techniques = [case["technique"] for case in cases()]
-    assert len(set(techniques)) >= 5
+    assert len(set(techniques)) == len(techniques)
+
+
+def test_the_corpus_covers_the_five_named_shapes():
+    """The set is specified, so the specification is the assertion.
+
+    Five ways a vendor overstates without lying, and each of them fails differently: a scope
+    qualifier is caught by reading the qualifier, an appendix exception by reading the appendix,
+    a stale date by reading the date. A corpus of five variations on one shape would produce a
+    single number that looked like five.
+    """
+    declared = json.loads(CORPUS.read_text())["the_five_shapes"]
+    by_id = {case["id"]: case for case in cases()}
+
+    assert set(declared) == set(by_id)
+    for case_id, shape in declared.items():
+        assert by_id[case_id]["technique"] == shape, case_id
+
+    positives = [case for case in cases() if case["must_flag"]]
+    assert len(positives) == 5
 
 
 def test_the_corpus_domains_are_rubric_domains():

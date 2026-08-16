@@ -5,12 +5,21 @@
 
   "what_makes_these_hard": "The existing contradictions are loud: a 24-hour commitment against a 9-day disclosure, organisation-wide MFA against an unremediated exception naming administrative access. Both are two numbers or two plain statements in direct opposition, and a model that missed them would be broken rather than imprecise. Every case below is a contradiction that survives a careless reading — the words agree and the meanings do not.",
 
+  "the_five_shapes": {
+    "SC01": "a scope qualifier that narrows a control",
+    "SC02": "an exception in an appendix rather than in the exception notes",
+    "SC03": "a date that makes a claim true-then and false-now",
+    "SC04": "a control described as planned rather than implemented",
+    "SC05": "a commitment missed rather than a control absent",
+    "SC06": "the control case — genuinely in place, and a finding here is a false positive"
+  },
+
   "detection_is_not_severity": "A case is caught when the model raises a finding at all. What severity it assigns is measured separately by scripts/severity_sweep.py, because a miss and a misgrade are different failures with different repairs.",
 
   "cases": [
     {
       "id": "SC01",
-      "technique": "scope qualifier narrowing the control",
+      "technique": "a scope qualifier that narrows a control",
       "domain": "data_protection",
       "claim": "All customer data is encrypted at rest using AES-256 with keys rotated every 90 days, across our entire platform.",
       "passage": "Encryption at rest using platform-managed AES-256 keys is applied to the Enterprise tier. Standard-tier customer data resides on the shared cluster, where encryption at rest is provided by the underlying storage service and key rotation is managed by that provider on its own schedule.",
@@ -20,7 +29,7 @@
     },
     {
       "id": "SC02",
-      "technique": "exception in an appendix rather than in the exception notes",
+      "technique": "an exception in an appendix rather than in the exception notes",
       "domain": "access_control",
       "claim": "Joiner, mover and leaver processes are automated and access is revoked within 24 hours of a leaver's last working day.",
       "passage": "Appendix B — Supplementary testing observations. Not carried into Section 5. B.4: Leaver deprovisioning was tested for 25 departures. Twenty-two were revoked within the stated window. Three accounts belonging to contractors engaged through the platform partner programme remained active for between 6 and 31 days after the engagement end date recorded in the partner system. Contractor accounts are outside the automated joiner-mover-leaver workflow.",
@@ -30,7 +39,7 @@
     },
     {
       "id": "SC03",
-      "technique": "true when written, false now",
+      "technique": "a date that makes a claim true-then and false-now",
       "domain": "compliance_posture",
       "claim": "All staff complete mandatory security awareness training annually, and completion stood at 100% at our most recent measurement.",
       "passage": "Security awareness training completion was 100% as at 31 March 2025, measured against the headcount on that date. The programme operates on an annual cycle with a single enrolment window each March. Headcount grew from 180 to 265 during the reporting period.",
@@ -40,7 +49,7 @@
     },
     {
       "id": "SC04",
-      "technique": "planned, described as implemented",
+      "technique": "a control described as planned rather than implemented",
       "domain": "incident_response",
       "claim": "We run a documented incident response plan with defined severity levels, and we test it through tabletop exercises.",
       "passage": "An incident response plan with four defined severity levels is documented and was provided to the auditors. Management has established a tabletop exercise programme and the first exercise is scheduled for the quarter following the reporting period. No exercise had been conducted as at the period end date.",
@@ -50,17 +59,18 @@
     },
     {
       "id": "SC05",
-      "technique": "cadence stated as outcome",
+      "technique": "a commitment missed rather than a control absent",
       "domain": "business_continuity",
-      "claim": "Backups are taken continuously and restore testing is performed quarterly.",
-      "passage": "Backup restore testing is scheduled quarterly. Two of the four scheduled tests in the period were completed. The remaining two were deferred; the reasons for deferral were not documented and no compensating test was performed.",
+      "claim": "Our recovery time objective is 4 hours, and we met it during the platform outage last year.",
+      "passage": "Service was restored 9 hours and 40 minutes after the start of the outage. The recovery runbook was followed and the recovery team was mobilised within the documented escalation window. Post-incident review recorded that the restore itself completed inside the objective; the elapsed time was driven by the decision to verify data integrity before returning the service to customers.",
       "must_flag": true,
-      "note": "Same shape as SC04 and a different register: here the claim states a cadence that the evidence confirms as a schedule and contradicts as an outcome. Included as a pair with SC04 so a miss on one and a catch on the other says something about which wording defeats the model rather than about the technique class as a whole.",
-      "failure_mode_if_missed": "Half the tests were not run and nobody wrote down why. That is a finding whether or not the schedule exists."
+      "note": "The control is present and it worked: there is a runbook, it was followed, the team mobilised on time, and the delay was a deliberate integrity check rather than a failure. What the evidence contradicts is the claim 'we met it', which is a statement about a commitment. This is the shape the medium severity anchor now describes — a commitment, target or timeframe the vendor states, which their own evidence shows was not met — and it is deliberately the hardest one to see, because every sentence in the passage reads as reassurance.",
+      "failure_mode_if_missed": "A missed RTO is a missed RTO however good the reason. A buyer planning around 4 hours needs to know the one observed data point is 9 hours 40, and a reviewer that reads the reassuring sentences and stops has done the vendor's work rather than the buyer's.",
+      "severity_is_measured_separately": "Detection is what this corpus measures. Whether a model that catches this grades it medium rather than high is the anchor question, and scripts/severity_sweep.py is what measures that."
     },
     {
       "id": "SC06",
-      "technique": "control genuinely in place",
+      "technique": "the control case — genuinely in place, and a finding here is a false positive",
       "domain": "data_protection",
       "claim": "Customer data is deleted within 30 days of contract termination, and we can evidence deletion on request.",
       "passage": "Deletion on termination was tested for eight terminated contracts. All eight were deleted within the 30-day contractual window, with deletion certificates issued and retained. Certificate retention is 7 years.",
