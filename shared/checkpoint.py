@@ -29,7 +29,7 @@ from typing import Any
 
 from google.cloud import firestore
 
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 from shared.idempotency import _serialise
 
 log = logging.getLogger("drawbridge.checkpoint")
@@ -49,7 +49,7 @@ def step(name: str, ctx, fn: Callable[[], Any]) -> Any:
             path re-runs it.
     """
     review_id = ctx.review_id
-    doc = firestore_client().collection(COLLECTION_REVIEWS).document(review_id)
+    doc = tenant.collection(COLLECTION_REVIEWS).document(review_id)
 
     snap = doc.get()
     state = snap.to_dict() or {}
@@ -97,7 +97,7 @@ def recheckpoint(name: str, ctx, result: Any) -> Any:
     Raises:
         TypeError: when the result cannot be serialised into the ledger.
     """
-    firestore_client().collection(COLLECTION_REVIEWS).document(ctx.review_id).set(
+    tenant.collection(COLLECTION_REVIEWS).document(ctx.review_id).set(
         {
             "completed_steps": firestore.ArrayUnion([name]),
             "step_results": {name: _serialise(result)},
@@ -110,7 +110,7 @@ def recheckpoint(name: str, ctx, result: Any) -> Any:
 
 def completed_steps(review_id: str) -> list[str]:
     """Return the ordered step names already completed for this review."""
-    snap = firestore_client().collection(COLLECTION_REVIEWS).document(review_id).get()
+    snap = tenant.collection(COLLECTION_REVIEWS).document(review_id).get()
     return list((snap.to_dict() or {}).get("completed_steps", []))
 
 
@@ -119,11 +119,11 @@ def current_step(review_id: str) -> str | None:
 
     On restart this is what the dashboard shows as "resumed from".
     """
-    snap = firestore_client().collection(COLLECTION_REVIEWS).document(review_id).get()
+    snap = tenant.collection(COLLECTION_REVIEWS).document(review_id).get()
     return (snap.to_dict() or {}).get("current_step")
 
 
 def step_result(review_id: str, name: str) -> Any:
     """Return the recorded result of a completed step, or ``None``."""
-    snap = firestore_client().collection(COLLECTION_REVIEWS).document(review_id).get()
+    snap = tenant.collection(COLLECTION_REVIEWS).document(review_id).get()
     return ((snap.to_dict() or {}).get("step_results") or {}).get(name)

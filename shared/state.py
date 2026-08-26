@@ -34,7 +34,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 from shared.domain import GateScope, Review, ReviewState, validate_transition
 
 log = logging.getLogger("drawbridge.state")
@@ -67,9 +67,19 @@ def park(
             into ``NEEDS_HUMAN`` is legal everywhere, so this only fires on a gate park from a
             state that has no gate.
     """
-    db = firestore_client()
-    ref = db.collection(COLLECTION_REVIEWS).document(review_id)
+    ref = tenant.collection(COLLECTION_REVIEWS).document(review_id)
     current = _current_state(ref)
+
+    # Parking a review that is already parked is not a transition, and must not be treated as
+    # one. ``ALLOWED`` deliberately excludes NEEDS_HUMAN -> NEEDS_HUMAN, because a review does
+    # not *move* by stopping twice — but this function is called from exception handlers, and
+    # one that raised because the review had already stopped would turn a handled failure into
+    # an unhandled one. The later reason is recorded rather than discarded: two things going
+    # wrong is worth more to an operator than the first of them alone.
+    if current is target:
+        _note_additional_reason(ref, reason)
+        log.info("review=%s is already parked at %s; also: %s", review_id, target.value, reason)
+        return
 
     if current is not None:
         validate_transition(current, target, gate_scope=gate_scope)
@@ -125,7 +135,7 @@ def advance(
     payload["gate_scope"] = None
     payload["park_reason"] = None
 
-    firestore_client().collection(COLLECTION_REVIEWS).document(review.review_id).set(
+    tenant.collection(COLLECTION_REVIEWS).document(review.review_id).set(
         payload, merge=True
     )
 
@@ -143,6 +153,18 @@ def advance(
         target.value,
         f" ({reason})" if reason else "",
     )
+
+
+def _note_additional_reason(ref, reason: str) -> None:
+    """Record a further reason on a review that has already stopped.
+
+    Appended rather than overwritten. The first reason is why the review stopped; a later one is
+    usually a consequence of it, and replacing the original would hide the cause behind its own
+    symptom.
+    """
+    from google.cloud import firestore
+
+    ref.set({"further_park_reasons": firestore.ArrayUnion([reason])}, merge=True)
 
 
 def _current_state(ref) -> ReviewState | None:
@@ -168,7 +190,7 @@ def _record(
 ) -> None:
     """Append a transition to the immutable ledger. The binder's timeline reads this."""
     event_id = uuid.uuid4().hex
-    firestore_client().collection(COLLECTION_EVENTS).document(event_id).set(
+    tenant.collection(COLLECTION_EVENTS).document(event_id).set(
         {
             "event_id": event_id,
             "type": f"review.{kind}",
@@ -190,7 +212,7 @@ def raise_card(review_id: str, *, kind: str, line: str, **fields) -> None:
     the card is the notification, not the thing that happened.
     """
     try:
-        firestore_client().collection(COLLECTION_DASHBOARD).add(
+        tenant.collection(COLLECTION_DASHBOARD).add(
             {
                 "kind": kind,
                 "review_id": review_id,
@@ -208,7 +230,7 @@ def _dashboard_card(
 ) -> None:
     """Raise the card an operator acts on. Never raises: a failed card must not swallow a park."""
     try:
-        firestore_client().collection(COLLECTION_DASHBOARD).add(
+        tenant.collection(COLLECTION_DASHBOARD).add(
             {
                 "kind": "gate" if target is ReviewState.GATED else "parked",
                 "review_id": review_id,

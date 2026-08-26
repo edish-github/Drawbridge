@@ -21,6 +21,12 @@ Acknowledgement rule, and it is the whole failure story:
   produces four more identical failures and a dead letter, and the parse will not start working.
 - anything else — nack, so a transient dependency failure is retried rather than swallowed.
 
+**One tenant per message.** The envelope carries its ``org_id`` and the loop adopts it for the
+duration of the dispatch, so every collection a handler reaches is that customer's. The scope is
+restored on the way out, exception or not. One topic carries every tenant's traffic and the
+subscription is shared, which is the ordinary arrangement — the isolation is in the data path,
+not in the queue.
+
 **Exhaustion is a failure edge and it is now executed rather than described.** Pub/Sub moves a
 message to its dead-letter topic after ``MAX_DELIVERY_ATTEMPTS``, and until this loop read the
 delivery count nothing moved the *review*: the message left the subscription and the review sat
@@ -49,6 +55,7 @@ from collections.abc import Callable
 
 from pydantic import ValidationError
 
+from shared import tenancy
 from shared.clients import subscriber_client, subscription_path
 from shared.context import context_for
 from shared.domain import Review
@@ -231,7 +238,15 @@ class Runner:
             return
 
         ctx = context_for(event, agent="worker")
-        with span(f"consume.{topic}", ctx, topic=topic, event_id=event.event_id):
+
+        # Everything below this line runs as one tenant, and the scope is restored on the way
+        # out even if a handler raises — so a failed message cannot leave the next one running
+        # as the wrong customer. This is the single place the worker adopts a tenant, which is
+        # why the loop is single-threaded: a background thread pool would make "the current
+        # organisation" a property of whichever callback last ran.
+        with tenancy.acting_for(event.org_id), span(
+            f"consume.{topic}", ctx, topic=topic, event_id=event.event_id
+        ):
             try:
                 review = guard(event, EXPECTED_STATES[topic])
                 if review is None:

@@ -53,7 +53,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 from shared.config import settings
 from shared.domain import ALLOWED_NOTE_TYPES, MemoryNote
 
@@ -161,7 +161,7 @@ def _write_note(vendor_id: str, note: MemoryNote) -> str:
     if settings().is_cloud:
         return _write_to_memory_bank(vendor_id, note)
 
-    doc = firestore_client().collection(COLLECTION_DOSSIERS).document()
+    doc = tenant.collection(COLLECTION_DOSSIERS).document()
     doc.set(_document(vendor_id, note, backend="firestore"))
     return doc.id
 
@@ -171,8 +171,7 @@ def _read_notes(vendor_id: str) -> list[MemoryNote]:
     from google.cloud.firestore_v1 import FieldFilter
 
     docs = (
-        firestore_client()
-        .collection(COLLECTION_DOSSIERS)
+        tenant.collection(COLLECTION_DOSSIERS)
         .where(filter=FieldFilter("vendor_id", "==", vendor_id))
         .where(filter=FieldFilter("superseded", "==", False))
         .stream()
@@ -195,7 +194,7 @@ def _write_to_memory_bank(vendor_id: str, note: MemoryNote) -> str:
     Firestore write standing — losing the semantic copy degrades recall quality, and losing the
     structural copy would lose the dossier.
     """
-    doc = firestore_client().collection(COLLECTION_DOSSIERS).document()
+    doc = tenant.collection(COLLECTION_DOSSIERS).document()
     doc.set(_document(vendor_id, note, backend="memory_bank"))
 
     try:
@@ -238,7 +237,7 @@ def mark_superseded(vendor_id: str, note_id: str) -> None:
     Supersession rather than deletion: the superseded note stays readable for the audit trail,
     it simply stops being the current view.
     """
-    firestore_client().collection(COLLECTION_DOSSIERS).document(note_id).set(
+    tenant.collection(COLLECTION_DOSSIERS).document(note_id).set(
         {"superseded": True, "superseded_at": datetime.now(UTC).isoformat()}, merge=True
     )
 

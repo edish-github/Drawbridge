@@ -34,6 +34,7 @@ from datetime import UTC, datetime
 from google.cloud import firestore
 from pydantic import BaseModel, Field
 
+from shared import tenancy as tenant
 from shared.clients import firestore_client
 from shared.domain import GateScope
 
@@ -99,8 +100,7 @@ def pending_token(review_id: str, scope: GateScope) -> str | None:
 
     try:
         docs = (
-            firestore_client()
-            .collection(COLLECTION_APPROVALS)
+            tenant.collection(COLLECTION_APPROVALS)
             .where(filter=FieldFilter("review_id", "==", review_id))
             .where(filter=FieldFilter("scope", "==", scope))
             .stream()
@@ -133,8 +133,7 @@ def conditions_for(review_id: str) -> list[str]:
 
     try:
         docs = (
-            firestore_client()
-            .collection(COLLECTION_APPROVALS)
+            tenant.collection(COLLECTION_APPROVALS)
             .where(filter=FieldFilter("review_id", "==", review_id))
             .where(filter=FieldFilter("scope", "==", "decision"))
             .stream()
@@ -151,7 +150,7 @@ def conditions_for(review_id: str) -> list[str]:
 
 def load_approval(jti: str) -> Approval | None:
     """Return the approval record for ``jti``, or ``None`` when there is none."""
-    snap = firestore_client().collection(COLLECTION_APPROVALS).document(jti).get()
+    snap = tenant.collection(COLLECTION_APPROVALS).document(jti).get()
     if not snap.exists:
         return None
     try:
@@ -166,7 +165,7 @@ def already_spent(jti: str) -> bool:
     if not jti:
         return True
     try:
-        return firestore_client().collection(COLLECTION_SPENT).document(jti).get().exists
+        return tenant.collection(COLLECTION_SPENT).document(jti).get().exists
     except Exception as exc:  # noqa: BLE001 — unreadable means treat as spent, the safe way
         log.warning("could not check whether %s was spent: %s", jti, exc)
         return True
@@ -196,8 +195,7 @@ def contact_established(review_id: str, target: str) -> bool:
 
     try:
         spent = (
-            firestore_client()
-            .collection(COLLECTION_SPENT)
+            tenant.collection(COLLECTION_SPENT)
             .where(filter=FieldFilter("review_id", "==", review_id))
             .where(filter=FieldFilter("target", "==", target))
             .limit(1)
@@ -217,7 +215,7 @@ def spend(jti: str, *, review_id: str, target: str) -> bool:
     read-then-write would let both through.
     """
     db = firestore_client()
-    ref = db.collection(COLLECTION_SPENT).document(jti)
+    ref = tenant.collection(COLLECTION_SPENT).document(jti)
 
     @firestore.transactional
     def claim(tx) -> bool:

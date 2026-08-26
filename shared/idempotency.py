@@ -34,6 +34,7 @@ from typing import Any
 
 from google.cloud import firestore
 
+from shared import tenancy as tenant
 from shared.clients import firestore_client
 
 log = logging.getLogger("drawbridge.idempotency")
@@ -106,7 +107,7 @@ def once(idem_key: str, ctx, fn: Callable[..., Any], *args, claim: Any = None, *
             not run and the claim is released.
     """
     db = firestore_client()
-    ref = db.collection(COLLECTION).document(idem_key)
+    ref = tenant.collection(COLLECTION).document(idem_key)
     source = getattr(ctx, "agent", "unknown")
 
     @firestore.transactional
@@ -215,8 +216,7 @@ def reconcile(review_id: str, *, older_than_seconds: int = RECONCILE_AFTER_SECON
 
     stale: list[str] = []
     docs = (
-        firestore_client()
-        .collection(COLLECTION)
+        tenant.collection(COLLECTION)
         .where(filter=FieldFilter("review_id", "==", review_id))
         .stream()
     )
@@ -246,7 +246,7 @@ def confirm(idem_key: str, *, confirmed_by: str, result: Any = None) -> dict:
         ReconciliationRequired: when the key was never claimed. Confirming an effect nobody
             attempted would write a done marker that silently skips real work later.
     """
-    ref = firestore_client().collection(COLLECTION).document(idem_key)
+    ref = tenant.collection(COLLECTION).document(idem_key)
     snap = ref.get()
     if not snap.exists:
         raise ReconciliationRequired(idem_key, "", "nobody")
@@ -280,7 +280,7 @@ def confirm(idem_key: str, *, confirmed_by: str, result: Any = None) -> dict:
 
 def record_status(idem_key: str) -> dict | None:
     """Return the raw idempotency record, or ``None`` when the key was never claimed."""
-    snap = firestore_client().collection(COLLECTION).document(idem_key).get()
+    snap = tenant.collection(COLLECTION).document(idem_key).get()
     return snap.to_dict() if snap.exists else None
 
 

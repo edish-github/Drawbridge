@@ -37,8 +37,8 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
+from shared import tenancy as tenant
 from shared.armor import ScreenResult, verdict_is_trustworthy
-from shared.clients import firestore_client
 from shared.telemetry import record_policy_event, span
 
 log = logging.getLogger("drawbridge.gateway")
@@ -373,7 +373,7 @@ def declare_unscreened(review_id: str | None) -> None:
         ALLOW_UNSCREENED_ENV,
     )
     try:
-        firestore_client().collection("reviews").document(review_id).set(
+        tenant.collection("reviews").document(review_id).set(
             {"unscreened_fixtures": True}, merge=True
         )
     except Exception as exc:  # noqa: BLE001 — the declaration must not break the run it labels
@@ -433,7 +433,7 @@ def enforce_limits(ctx) -> None:
     if not review_id:
         return
 
-    snap = firestore_client().collection("reviews").document(review_id).get()
+    snap = tenant.collection("reviews").document(review_id).get()
     data = snap.to_dict() or {}
     if data.get("park_reason") == "cost_ceiling":
         raise PolicyViolation(
@@ -472,7 +472,7 @@ def log_policy_block(policy: str, ctx, **attrs) -> None:
     log.warning(line)
 
     try:
-        firestore_client().collection(COLLECTION_DASHBOARD).add(
+        tenant.collection(COLLECTION_DASHBOARD).add(
             {
                 "kind": "policy_block",
                 "policy": policy,

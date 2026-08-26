@@ -53,7 +53,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 from shared.config import settings
 from shared.domain import Finding
 
@@ -394,7 +394,7 @@ def record_screening(review_id: str, result: ScreenResult) -> str:
     """
     doc = result.model_dump(mode="json")
     doc["review_id"] = review_id
-    ref = firestore_client().collection(COLLECTION_SCREENINGS).document()
+    ref = tenant.collection(COLLECTION_SCREENINGS).document()
     ref.set(doc)
     log.info(
         "screened review=%s origin=%s verdict=%s trustworthy=%s",
@@ -460,7 +460,7 @@ def store_inert_excerpt(review_id: str, excerpt: str) -> str:
     Inert means exactly one thing: the text is stored for the binder and is never included in a
     prompt again. Re-feeding it would defeat the point of having blocked it.
     """
-    ref = firestore_client().collection(COLLECTION_EXCERPTS).document()
+    ref = tenant.collection(COLLECTION_EXCERPTS).document()
     ref.set(
         {
             "review_id": review_id,
@@ -514,8 +514,7 @@ def stamp_for(review_id: str, ref: str) -> str | None:
 
     records = [
         d.to_dict() or {}
-        for d in firestore_client()
-        .collection(COLLECTION_SCREENINGS)
+        for d in tenant.collection(COLLECTION_SCREENINGS)
         .where(filter=FieldFilter("review_id", "==", review_id))
         .stream()
     ]
@@ -545,8 +544,7 @@ def stamps_for(review_id: str, refs: list[str] | None = None) -> list[str]:
 
     out: list[str] = []
     for doc in (
-        firestore_client()
-        .collection(COLLECTION_SCREENINGS)
+        tenant.collection(COLLECTION_SCREENINGS)
         .where(filter=FieldFilter("review_id", "==", review_id))
         .stream()
     ):
@@ -612,14 +610,13 @@ def index_chunks(clean_ref: str, review_id: str) -> int:
         return 0
 
     ctx = SimpleNamespace(review_id=review_id, agent="screening", trace_id="")
-    db = firestore_client()
     written = 0
 
     for index, body in enumerate(chunks):
         chunk_id = f"{review_id}:{_short(clean_ref)}:{index:03d}"
         try:
             vector = embed(body, ctx)
-            db.collection(CHUNK_COLLECTION).document(chunk_id).set(
+            tenant.collection(CHUNK_COLLECTION).document(chunk_id).set(
                 {
                     "chunk_id": chunk_id,
                     "review_id": review_id,

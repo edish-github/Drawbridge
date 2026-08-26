@@ -30,7 +30,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 from shared.graph import GRAPH, Arm, Join, JoinMode
 
 log = logging.getLogger("drawbridge.join")
@@ -251,7 +251,7 @@ def _followup_arm(arm: Arm, review_id: str) -> ArmState:
 
 
 def _chase_arm(arm: Arm, review_id: str) -> ArmState:
-    snap = firestore_client().collection("reviews").document(review_id).get()
+    snap = tenant.collection("reviews").document(review_id).get()
     rounds = int((snap.to_dict() or {}).get("chase_round", 0))
     return ArmState(
         arm.name,
@@ -308,7 +308,7 @@ _READERS = {
 def _count(collection: str, review_id: str, equals: dict) -> int:
     from google.cloud.firestore_v1 import FieldFilter
 
-    query = firestore_client().collection(collection).where(
+    query = tenant.collection(collection).where(
         filter=FieldFilter("review_id", "==", review_id)
     )
     for field, value in equals.items():
@@ -318,5 +318,5 @@ def _count(collection: str, review_id: str, equals: dict) -> int:
 
 def _overridden(review_id: str) -> bool:
     """Whether an analyst has declared the reply thread finished."""
-    snap = firestore_client().collection("reviews").document(review_id).get()
+    snap = tenant.collection("reviews").document(review_id).get()
     return bool((snap.to_dict() or {}).get("replies_complete", False))

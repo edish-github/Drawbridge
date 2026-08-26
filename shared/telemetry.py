@@ -38,6 +38,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 from opentelemetry.trace import StatusCode
 
+from shared import tenancy as tenant
 from shared.config import settings
 
 log = logging.getLogger("drawbridge.telemetry")
@@ -196,10 +197,9 @@ def record_decision(s, *, goal: str, decision: str, ctx=None, node: str | None =
 
     from datetime import UTC, datetime
 
-    from shared.clients import firestore_client
 
     try:
-        firestore_client().collection(COLLECTION_DECISIONS).add(
+        tenant.collection(COLLECTION_DECISIONS).add(
             {
                 "review_id": review_id,
                 "agent": getattr(ctx, "agent", "") or "",

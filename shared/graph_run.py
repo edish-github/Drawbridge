@@ -43,7 +43,7 @@ import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 from shared.domain import ReviewState
 from shared.graph import GRAPH, Edge, Graph, Node, NodeKind
 
@@ -470,7 +470,7 @@ def _by_vendor_collection(name: str, ledger: _Ledger, node: Node, run: GraphRun)
         return []
     count = sum(
         1
-        for _ in firestore_client()
+        for _ in tenant
         .collection(name)
         .where(filter=FieldFilter("vendor_id", "==", vendor_id))
         .stream()
@@ -551,15 +551,13 @@ def _traversals(graph: Graph, run: GraphRun, ledger: _Ledger) -> tuple[Traversal
 def _load(review_id: str) -> _Ledger:
     """Fetch the review's ledger once. Never raises on a collection it cannot read."""
     from google.cloud.firestore_v1 import FieldFilter
-
-    db = firestore_client()
     unreadable: set[str] = set()
 
     def rows(collection: str) -> list[dict]:
         try:
             return [
                 d.to_dict() or {}
-                for d in db.collection(collection)
+                for d in tenant.collection(collection)
                 .where(filter=FieldFilter("review_id", "==", review_id))
                 .stream()
             ]
@@ -568,7 +566,7 @@ def _load(review_id: str) -> _Ledger:
             unreadable.add(collection)
             return []
 
-    review = db.collection("reviews").document(review_id).get().to_dict() or {}
+    review = tenant.collection("reviews").document(review_id).get().to_dict() or {}
     counts: dict[str, int] = {}
     for name in COLLECTIONS_WATCHED:
         counts[name] = len(rows(name))

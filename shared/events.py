@@ -24,7 +24,8 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
-from shared.clients import firestore_client, publisher_client, topic_path
+from shared import tenancy as tenant
+from shared.clients import publisher_client, topic_path
 from shared.domain import Review, ReviewState, is_terminal
 
 log = logging.getLogger("drawbridge.events")
@@ -111,6 +112,9 @@ class EventEnvelope(BaseModel):
     Attributes:
         event_id: uuid4, unique per publish attempt.
         type: the topic name, one of ``ALL_TOPICS``.
+        org_id: the tenant this event belongs to. On the envelope rather than looked up by the
+            consumer: a handler must not have to ask a second system who its work is for, and one
+            topic carries every tenant's traffic.
         review_id: the review this event belongs to.
         idem_key: ``review_id:plan_vN:step_id`` — derived from workflow position, never from a
             timestamp or uuid, or the exactly-once guard is worthless.
@@ -122,6 +126,7 @@ class EventEnvelope(BaseModel):
 
     event_id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     type: str
+    org_id: str
     review_id: str
     idem_key: str
     trace_id: str
@@ -167,6 +172,7 @@ def publish(topic: str, review_id: str, payload: dict, *, ctx) -> str:
     # `or` rather than a getattr default: the attribute exists, it is simply not set yet.
     envelope = EventEnvelope(
         type=topic,
+        org_id=ctx.org_id,
         review_id=review_id,
         idem_key=getattr(ctx, "idem_key", None) or f"{review_id}:plan_v1:{topic}",
         trace_id=getattr(ctx, "trace_id", uuid.uuid4().hex),
@@ -188,14 +194,14 @@ def record_event(envelope: EventEnvelope) -> None:
     The ledger is what the audit binder's timeline is rendered from, so this is append-only by
     construction: each event is its own document keyed by ``event_id`` and nothing updates one.
     """
-    firestore_client().collection(COLLECTION_EVENTS).document(envelope.event_id).set(
+    tenant.collection(COLLECTION_EVENTS).document(envelope.event_id).set(
         envelope.model_dump(mode="json")
     )
 
 
 def load_review(review_id: str) -> Review | None:
     """Load a review from the ledger, or ``None`` when it does not exist yet."""
-    snap = firestore_client().collection(COLLECTION_REVIEWS).document(review_id).get()
+    snap = tenant.collection(COLLECTION_REVIEWS).document(review_id).get()
     if not snap.exists:
         return None
     return Review.model_validate(snap.to_dict())
@@ -291,7 +297,7 @@ def _append_addendum(ev: EventEnvelope, *, reason: str) -> None:
     doc = ev.model_dump(mode="json")
     doc["addendum"] = True
     doc["addendum_reason"] = reason
-    firestore_client().collection(COLLECTION_EVENTS).document(ev.event_id).set(doc)
+    tenant.collection(COLLECTION_EVENTS).document(ev.event_id).set(doc)
 
 
 def _signal_seen(review_id: str, signal_id: str) -> bool:
@@ -299,8 +305,7 @@ def _signal_seen(review_id: str, signal_id: str) -> bool:
     from google.cloud.firestore_v1 import FieldFilter
 
     hits = (
-        firestore_client()
-        .collection(COLLECTION_EVENTS)
+        tenant.collection(COLLECTION_EVENTS)
         .where(filter=FieldFilter("review_id", "==", review_id))
         .where(filter=FieldFilter("type", "==", TOPIC_WATCHDOG_HIT))
         .stream()

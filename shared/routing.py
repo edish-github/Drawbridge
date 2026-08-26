@@ -47,7 +47,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from shared.clients import firestore_client, genai_client
+from shared import tenancy as tenant
+from shared.clients import genai_client
 from shared.config import settings
 from shared.telemetry import span
 
@@ -475,7 +476,7 @@ def accumulate_review_cost(review_id: str, cost: float) -> float:
     from shared.state import park
 
     cfg = settings()
-    ref = firestore_client().collection(COLLECTION_REVIEWS).document(review_id)
+    ref = tenant.collection(COLLECTION_REVIEWS).document(review_id)
     ref.set({"cost_usd": firestore.Increment(cost)}, merge=True)
 
     snap = ref.get()
