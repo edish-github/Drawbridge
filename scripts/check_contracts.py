@@ -13,6 +13,11 @@ concern:
   matching it, the table in the README is no longer describing the project.
 - **public-routes** — no route reachable without a token may reach the model router. A public
   endpoint that can be made to spend tokens is a credit drain found by a billing alert.
+- **graph** — the declared review graph in ``shared/graph.py`` is a description of the system,
+  and a description nothing checks is a description that stops being true. This diffs it against
+  the four places the topology actually lives: the subscriber's handler table, the event
+  contract's state expectations, the plan step vocabulary and the permission matrix. It is the
+  check that stops diagram 23 becoming the thing diagram 23 was originally deleted for being.
 
 Failure semantics: every check reports every problem it found rather than the first, and exits
 non-zero if any check failed. A check whose inputs are missing fails rather than passing
@@ -231,12 +236,270 @@ def check_public_routes() -> bool:
     return _fail(problems, "no public route reaches the model router")
 
 
+# --- graph -----------------------------------------------------------------------------------
+#
+# The graph is data, so everything about it is checkable, and the four checks below are the four
+# ways it could quietly stop describing the fleet:
+#
+#   a node consumes a topic nothing publishes, or nothing consumes a topic a node emits
+#   a node claims to run in a state the event contract says its trigger never arrives in
+#   a node names a plan step the planner cannot emit
+#   a node's contract claims access its identity does not have — or denies access it does
+#
+# The last is the one worth having. A node contract that over-claims fails the first time real
+# IAM is applied, which is late; a node contract that *under*-claims never fails at all, and the
+# published permission matrix silently stops matching the graph a reader is being shown.
+
+GRAPH_EXEMPT_IDENTITIES = frozenset({"any", "operator"})
+"""Identities in the graph that are not service accounts.
+
+Two, and both are real rather than convenient. ``needs_human`` is reachable from every node and
+belongs to whichever identity parked the review, so it has no single matrix row to check against.
+``intake`` runs as ``operator`` because no service account in the matrix can write the reviews
+collection — reviews are opened today by ``scripts/open_review.py`` under a developer credential,
+and the dashboard, which is the obvious hosted intake surface, deliberately holds no write path.
+That is a gap in the deployment story rather than a gap in this check, and it is recorded on the
+node so it cannot be forgotten.
+
+Enumerated rather than pattern-matched, because the next node that quietly acquires an identity
+outside the matrix should fail this check rather than join the exemption.
+"""
+
+SCHEDULER_TOPICS = frozenset({"review.chase_due", "watchdog.sweep"})
+"""Topics with no in-graph publisher because a timer fires them.
+
+Named individually rather than skipped by pattern: a third topic that nothing publishes is a
+bug, and the way to keep that true is to make adding one to this set a deliberate edit.
+"""
+
+
+def check_graph() -> bool:
+    """The declared review graph must agree with the code that executes it."""
+    problems: list[str] = []
+
+    from shared.events import ALL_TOPICS, EXPECTED_STATES
+    from shared.graph import GRAPH, EdgeKind, GraphInvalid, NodeKind, validate
+
+    try:
+        validate()
+    except GraphInvalid as exc:
+        problems.append(str(exc))
+        return _fail(problems, "the review graph matches the code that executes it")
+
+    # --- topics ---------------------------------------------------------------------------
+    for node in GRAPH.nodes:
+        for topic in (*node.triggered_by, *node.emits):
+            if topic not in ALL_TOPICS:
+                problems.append(f"node {node.id} names {topic!r}, which is not a declared topic")
+
+    from shared.subscriber import handlers
+
+    consumed = {t for n in GRAPH.nodes for t in n.triggered_by}
+    published = {t for n in GRAPH.nodes for t in n.emits}
+    registered = set(handlers())
+
+    for topic in sorted(registered - consumed):
+        problems.append(
+            f"{topic} has a registered handler but no node consumes it; the graph is missing a "
+            "node or the handler is dead"
+        )
+    for topic in sorted(consumed - registered):
+        problems.append(
+            f"{topic} is consumed by a node but has no handler in shared.subscriber.handlers"
+        )
+    for topic in sorted(consumed - published - SCHEDULER_TOPICS):
+        problems.append(f"{topic} is consumed by a node and emitted by none")
+
+    # --- states ---------------------------------------------------------------------------
+    # Checked against the *union* over a node's triggers, not against each one. A node with two
+    # triggers legitimately arrives in the union of their in-phase states: the scorer is reached
+    # by review.findings_ready from EVIDENCE_REVIEW and by review.rescore from SCORED, and
+    # requiring every state to be valid for every trigger would reject a correct declaration.
+    # The second loop is what stops the union from hiding a trigger that can never fire here.
+    for node in GRAPH.nodes:
+        if not node.triggered_by:
+            continue
+        union: set = set()
+        for topic in node.triggered_by:
+            union |= EXPECTED_STATES.get(topic, set())
+        stray = sorted(str(s) for s in node.arrives_in - union)
+        if stray:
+            problems.append(
+                f"node {node.id} declares state(s) {stray} that none of its triggers "
+                f"{list(node.triggered_by)} ever arrive in"
+            )
+        for topic in node.triggered_by:
+            expected = EXPECTED_STATES.get(topic)
+            if expected is not None and node.arrives_in and not (node.arrives_in & expected):
+                problems.append(
+                    f"node {node.id} is triggered by {topic}, which never arrives in any state "
+                    f"the node declares running in"
+                )
+
+    # --- declared advances must be legal transitions ----------------------------------------
+    #
+    # The graph and the state machine are two descriptions of the same movement, and this is the
+    # seam between them. A node that says it advances a review somewhere the transition table
+    # forbids is a picture of a system that would raise InvalidTransition the first time it ran.
+    from shared.domain import ALLOWED
+
+    for node in GRAPH.nodes:
+        if node.advances_to is None:
+            continue
+        for origin in node.arrives_in:
+            if node.advances_to is origin:
+                continue
+            if node.advances_to not in ALLOWED.get(origin, set()):
+                problems.append(
+                    f"node {node.id} declares it advances {origin} -> {node.advances_to}, which "
+                    "the transition table forbids"
+                )
+
+    # --- plan steps and checkpoints --------------------------------------------------------
+    from agents.orchestrator.planner import STEP_VOCABULARY
+
+    for node in GRAPH.nodes:
+        if node.plan_step and node.plan_step not in STEP_VOCABULARY:
+            problems.append(
+                f"node {node.id} names plan step {node.plan_step!r}, which is not in "
+                "STEP_VOCABULARY and so can never appear in a plan"
+            )
+
+    checkpoints = _checkpoint_constants()
+    for node in GRAPH.nodes:
+        if node.checkpoint and node.checkpoint not in checkpoints:
+            problems.append(
+                f"node {node.id} declares checkpoint {node.checkpoint!r}, which no agent module "
+                f"records. Known checkpoints: {sorted(checkpoints)}"
+            )
+
+    # --- node contracts against the permission matrix --------------------------------------
+    matrix = yaml.safe_load((ROOT / "infra" / "iam" / "permission-matrix.yaml").read_text())
+    by_name = {i["name"]: i for i in matrix["identities"]}
+
+    for node in GRAPH.nodes:
+        if node.identity in GRAPH_EXEMPT_IDENTITIES:
+            continue
+        identity = by_name.get(node.identity)
+        if identity is None:
+            problems.append(f"node {node.id} runs as {node.identity!r}, which has no matrix row")
+            continue
+
+        fs = identity.get("firestore") or {}
+        granted_reads = set(fs.get("read") or []) | set(fs.get("write") or [])
+        granted_writes = set(fs.get("write") or [])
+
+        for collection in node.contract.writes:
+            if collection not in granted_writes:
+                problems.append(
+                    f"node {node.id} declares writing {collection!r}, which {node.identity} "
+                    "cannot write"
+                )
+        for collection in node.contract.reads:
+            if collection not in granted_reads:
+                problems.append(
+                    f"node {node.id} declares reading {collection!r}, which {node.identity} "
+                    "cannot read"
+                )
+
+        # A forbidden capability naming a collection must genuinely be ungranted. This catches
+        # the contract that still says "no findings write" after somebody added one.
+        for denial in node.contract.forbidden:
+            collection, _, verb = denial.partition(" ")
+            if verb == "write" and collection in granted_writes:
+                problems.append(
+                    f"node {node.id} forbids {denial!r} but {node.identity} is granted it"
+                )
+
+        if node.contract.model and not identity.get("vertex_ai"):
+            problems.append(
+                f"node {node.id} declares a {node.contract.model} model but {node.identity} "
+                "holds no Vertex AI grant"
+            )
+
+    # --- joins have readers -----------------------------------------------------------------
+    from shared.join import _READERS
+
+    for join in GRAPH.joins:
+        for arm in join.arms:
+            if arm.name not in _READERS:
+                problems.append(
+                    f"join {join.id} waits on arm {arm.name!r} that shared.join cannot read"
+                )
+
+    # --- event edges carry a topic ----------------------------------------------------------
+    for edge in GRAPH.edges:
+        if edge.kind is EdgeKind.EVENT and edge.trigger not in ALL_TOPICS:
+            problems.append(
+                f"event edge {edge.source}->{edge.target} carries {edge.trigger!r}, which is "
+                "not a declared topic"
+            )
+
+    # --- the node ids agents refer to are declared -------------------------------------------
+    for path, name, value in _node_constants():
+        if not GRAPH.has(value):
+            problems.append(f"{path} defines {name} = {value!r}, which is not a graph node")
+
+    # --- every agent identity owns at least one node -----------------------------------------
+    owners = {n.identity for n in GRAPH.nodes}
+    for name in ("sa-orchestrator", "sa-questionnaire", "sa-evidence", "sa-scorer", "sa-watchdog"):
+        if name not in owners:
+            problems.append(f"{name} owns no node; an agent absent from the graph is not drawn")
+
+    kinds = {n.kind for n in GRAPH.nodes}
+    for required in (NodeKind.ROUTER, NodeKind.JOIN, NodeKind.GATE):
+        if required not in kinds:
+            problems.append(f"the graph declares no {required} node")
+
+    return _fail(problems, "the review graph matches the code that executes it")
+
+
+def _checkpoint_constants() -> set[str]:
+    """Checkpoint names recorded anywhere in ``agents/``.
+
+    Read out of the source rather than imported, so this check does not depend on every agent
+    module being importable — a broken agent should fail as a broken agent, not as a graph
+    problem.
+    """
+    found: set[str] = set()
+    for path in (ROOT / "agents").rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            if not isinstance(node.value, ast.Constant) or not isinstance(node.value.value, str):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id.startswith(("STEP_", "SEND_STEP")):
+                    found.add(node.value.value)
+    return found
+
+
+def _node_constants():
+    """Every ``NODE_x = "y"`` in ``agents/``, as (path, name, value)."""
+    for path in (ROOT / "agents").rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            if not isinstance(node.value, ast.Constant) or not isinstance(node.value.value, str):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id.startswith("NODE_"):
+                    yield str(path.relative_to(ROOT)), target.id, node.value.value
+
+
 CHECKS = {
     "topics": check_topics,
     "rubric": check_rubric,
     "bank": check_bank,
     "iam": check_iam,
     "public-routes": check_public_routes,
+    "graph": check_graph,
 }
 
 
