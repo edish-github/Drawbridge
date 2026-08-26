@@ -23,7 +23,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 
 log = logging.getLogger("drawbridge.binder")
 
@@ -91,14 +91,13 @@ def collect(review_id: str) -> Binder:
         ReviewNotFound: when the review does not exist. A binder assembled from whatever
             happened to be in the collections would be a document about nothing.
     """
-    db = firestore_client()
 
-    review = (db.collection("reviews").document(review_id).get().to_dict()) or {}
+    review = (tenant.collection("reviews").document(review_id).get().to_dict()) or {}
     if not review:
         raise ReviewNotFound(f"no review {review_id!r}; there is nothing to render")
 
     vendor = (
-        db.collection("vendors").document(str(review.get("vendor_id", ""))).get().to_dict()
+        tenant.collection("vendors").document(str(review.get("vendor_id", ""))).get().to_dict()
     ) or {}
 
     binder = Binder(review=review, vendor=vendor)
@@ -109,9 +108,9 @@ def collect(review_id: str) -> Binder:
     binder.chunks = {
         str(c.get("chunk_id")): c for c in _by_review("evidence_chunks", review_id)
     }
-    binder.score = (db.collection("scores").document(review_id).get().to_dict()) or {}
+    binder.score = (tenant.collection("scores").document(review_id).get().to_dict()) or {}
     binder.memo = str(
-        ((db.collection("memos").document(review_id).get().to_dict()) or {}).get("text", "")
+        ((tenant.collection("memos").document(review_id).get().to_dict()) or {}).get("text", "")
     )
     binder.decisions = _sorted(_by_review("dashboard_events", review_id), "at")
     binder.reasoning = _sorted(_by_review("decisions", review_id), "at")
@@ -180,7 +179,7 @@ def _chain_view(vendor_id: str) -> dict:
     if not vendor_id:
         return {}
 
-    vendor = firestore_client().collection("vendors").document(vendor_id).get().to_dict() or {}
+    vendor = tenant.collection("vendors").document(vendor_id).get().to_dict() or {}
     chain = _sorted(_by_field("subprocessors", "vendor_id", vendor_id), "name")
     if not chain:
         return {}
@@ -208,7 +207,7 @@ def _by_field(collection: str, field_name: str, value: str) -> list[dict]:
         return []
     return [
         d.to_dict() or {}
-        for d in firestore_client()
+        for d in tenant
         .collection(collection)
         .where(filter=FieldFilter(field_name, "==", value))
         .stream()

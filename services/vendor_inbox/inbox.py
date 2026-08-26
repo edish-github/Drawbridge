@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 
+from shared import tenancy
 from shared.armor import screen_text
 from shared.context import AgentContext
 from shared.events import TOPIC_VENDOR_REPLY_RECEIVED, publish
@@ -40,7 +41,12 @@ def receive(review_id: str, body: str, message_id: str) -> str:
     origin_ref = f"reply:{message_id}"
     result = screen_text(body, review_id, origin_ref)
 
-    ctx = AgentContext(review_id=review_id, agent="vendor_inbox", trace_id="")
+    ctx = AgentContext(
+        org_id=tenancy.current_org(),
+        review_id=review_id,
+        agent="vendor_inbox",
+        trace_id="",
+    )
     publish(
         TOPIC_VENDOR_REPLY_RECEIVED,
         review_id,
