@@ -46,17 +46,19 @@ export function PageHead({
 
 /** A page that could not read its data. Says what broke rather than rendering an empty shell. */
 export function LoadError({ error }: { error: unknown }) {
+  // The message is deliberately about what the reader can do, not about what broke. An operator
+  // seeing this cannot fix a database, and a stack trace on a security product's screen is an
+  // information leak before it is an inconvenience. The detail goes to the server log.
+  if (typeof console !== "undefined") console.error("[console] ledger read failed:", error);
+
   return (
     <div className="scroll-area">
       <div className="banner">
-        <strong>The console could not read the ledger.</strong> {String(error)}
+        <strong>We could not load your workspace.</strong> This is on our side, not yours.
       </div>
       <p className="body-text">
-        The console runs against the Firestore emulator in local mode. Start it with{" "}
-        <code className="mono">make emulators</code> and launch this app through{" "}
-        <code className="mono">make dashboard</code>, which sets{" "}
-        <code className="mono">FIRESTORE_EMULATOR_HOST</code> and the project id the fleet writes
-        under.
+        Nothing has been changed. Try again in a moment — if it keeps happening, contact support
+        and mention the time you saw this.
       </p>
     </div>
   );

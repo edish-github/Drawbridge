@@ -1,33 +1,24 @@
 /**
- * The console frame: a fixed shell with a scrolling interior.
+ * The document. Nothing else.
  *
- * The whole application lives inside one rounded card on a warm ground, and the interior is the
- * only thing that scrolls. That is not decoration — an operator working a queue moves between
- * eleven screens in a session, and a shell that stays put means the navigation never reflows
- * under the cursor and the page they were reading is the only thing that moved.
+ * The console's frame lives in `(app)/layout.tsx` so it wraps the signed-in application only —
+ * the authentication screens render on the bare ground, because there is no workspace to draw
+ * navigation for until somebody has chosen one.
  */
 
 import type { Metadata } from "next";
-import Nav from "./nav";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Drawbridge — vendor security review fleet",
+  title: "Drawbridge — vendor security review",
   description:
-    "Read-only operator console over the review ledger. Every number on screen was computed by the fleet.",
+    "Autonomous vendor security reviews with a human at every decision point. Every number on screen was computed, not written.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>
-        <div className="frame">
-          <div className="console">
-            <Nav />
-            <main className="main">{children}</main>
-          </div>
-        </div>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

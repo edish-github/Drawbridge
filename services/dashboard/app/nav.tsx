@@ -112,7 +112,15 @@ const ITEMS: Item[] = [
   },
 ];
 
-export default function Nav() {
+export default function Nav({
+  orgName,
+  userName,
+  role,
+}: {
+  orgName: string;
+  userName: string;
+  role: string;
+}) {
   const pathname = usePathname() || "/";
   const isLeaf = (leaf: Leaf) => (leaf.match ? leaf.match(pathname) : pathname === leaf.href);
 
@@ -171,23 +179,56 @@ export default function Nav() {
       </nav>
 
       <div className="sidebar-foot">
-        <div className="avatar" aria-hidden="true">
-          NG
-        </div>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 12.2, fontWeight: 600, lineHeight: 1.3 }}>Northgate Security</div>
-          <div
-            style={{
-              fontFamily: "var(--mono)",
-              fontSize: 10,
-              fontWeight: 500,
-              lineHeight: 1.3,
-              color: "var(--faint)",
-            }}
-          >
-            WORKSPACE · LOCAL
-          </div>
-        </div>
+        <Link
+          href="/workspaces"
+          style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}
+          title="Switch workspace"
+        >
+          <span className="avatar" aria-hidden="true">
+            {orgName.slice(0, 2).toUpperCase()}
+          </span>
+          <span style={{ minWidth: 0, flex: 1 }}>
+            <span
+              style={{
+                display: "block",
+                fontSize: 12.2,
+                fontWeight: 600,
+                lineHeight: 1.3,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {orgName}
+            </span>
+            <span
+              style={{
+                display: "block",
+                fontFamily: "var(--mono)",
+                fontSize: 10,
+                fontWeight: 500,
+                lineHeight: 1.3,
+                color: "var(--faint)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {userName} · {role}
+            </span>
+          </span>
+        </Link>
+        <Link href="/logout" title="Sign out" aria-label="Sign out" style={{ flex: "none" }}>
+          <svg width="15" height="15" viewBox="0 0 18 18" fill="none" aria-hidden="true">
+            <path
+              d="M7 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h3"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+            />
+            <path d="M11 12.5 14.5 9 11 5.5M14 9H7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </Link>
       </div>
     </aside>
   );

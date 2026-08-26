@@ -305,6 +305,7 @@
       "display": "Drawbridge vendor portal",
       "purpose": "Token-scoped vendor-facing surface.",
       "reads": [
+        "orgs",
         "qa_responses",
         "reviews"
       ],
@@ -333,11 +334,14 @@
         "findings",
         "followups",
         "inbox",
+        "memberships",
         "memos",
+        "orgs",
         "reviews",
         "scores",
         "screenings",
         "tasks",
+        "users",
         "vendors"
       ],
       "writes": [
@@ -372,6 +376,30 @@
       "secrets": [
         "drawbridge-approval-key"
       ]
+    },
+    {
+      "name": "sa-identity",
+      "display": "Drawbridge identity service",
+      "purpose": "Signup, organisation creation and membership. The only identity that may write the three platform collections, and the only one that reads them all \u2014 which is why it is separate from the console rather than a capability the console holds. A surface every reviewer can reach must not be able to add itself to another organisation.",
+      "reads": [
+        "memberships",
+        "orgs",
+        "users"
+      ],
+      "writes": [
+        "events",
+        "memberships",
+        "orgs",
+        "users"
+      ],
+      "never": [
+        "any tenant collection",
+        "any generative model call",
+        "approvals write",
+        "findings write"
+      ],
+      "vertex_ai": false,
+      "secrets": []
     },
     {
       "name": "sa-binder",
@@ -479,7 +507,9 @@
     "idempotency",
     "inbox",
     "inert_excerpts",
+    "memberships",
     "memos",
+    "orgs",
     "qa_responses",
     "qa_responses_superseded",
     "reviews",
@@ -487,6 +517,7 @@
     "screenings",
     "subprocessors",
     "tasks",
+    "users",
     "vendors"
   ]
 }

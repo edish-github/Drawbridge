@@ -46,13 +46,41 @@ export function db(): Firestore {
   return client;
 }
 
-async function all(collection: string, limit = 4000): Promise<Doc[]> {
-  const snapshot = await db().collection(collection).limit(limit).get();
+/**
+ * One tenant's collections.
+ *
+ * Every customer's data hangs off `orgs/{orgId}/`, exactly as it does on the Python side. The
+ * path is the isolation: there is no way to name a collection here without naming the
+ * organisation that owns it, so a query that forgot its scope is a type error rather than
+ * another customer's evidence on somebody's screen.
+ *
+ * The three platform collections — `orgs`, `users`, `memberships` — are reached through `db()`
+ * directly, because they are how organisations exist.
+ */
+export function tenant(orgId: string) {
+  if (!orgId) {
+    throw new Error(
+      "no organisation in scope. Every ledger read is tenant-scoped; pass the signed-in " +
+        "principal's orgId.",
+    );
+  }
+  return {
+    collection: (name: string) => db().collection("orgs").doc(orgId).collection(name),
+  };
+}
+
+async function all(orgId: string, collection: string, limit = 4000): Promise<Doc[]> {
+  const snapshot = await tenant(orgId).collection(collection).limit(limit).get();
   return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
-async function forReview(collection: string, reviewId: string, limit = 800): Promise<Doc[]> {
-  const snapshot = await db()
+async function forReview(
+  orgId: string,
+  collection: string,
+  reviewId: string,
+  limit = 800,
+): Promise<Doc[]> {
+  const snapshot = await tenant(orgId)
     .collection(collection)
     .where("review_id", "==", reviewId)
     .limit(limit)
@@ -60,9 +88,14 @@ async function forReview(collection: string, reviewId: string, limit = 800): Pro
   return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
-async function forVendor(collection: string, vendorId: string, limit = 400): Promise<Doc[]> {
+async function forVendor(
+  orgId: string,
+  collection: string,
+  vendorId: string,
+  limit = 400,
+): Promise<Doc[]> {
   if (!vendorId) return [];
-  const snapshot = await db()
+  const snapshot = await tenant(orgId)
     .collection(collection)
     .where("vendor_id", "==", vendorId)
     .limit(limit)
@@ -156,8 +189,8 @@ export function initials(name: string): string {
  * missing vendor is a data problem an operator should be able to see, and silently filtering it
  * would make the console the reason nobody noticed.
  */
-export async function queue(limit = 400): Promise<Doc[]> {
-  const [reviews, vendors] = await Promise.all([all("reviews"), all("vendors")]);
+export async function queue(orgId: string, limit = 400): Promise<Doc[]> {
+  const [reviews, vendors] = await Promise.all([all(orgId, "reviews"), all(orgId, "vendors")]);
   const byId = new Map(vendors.map((v) => [v.vendor_id ?? v.id, v]));
 
   return reviews
@@ -166,11 +199,11 @@ export async function queue(limit = 400): Promise<Doc[]> {
     .slice(0, limit);
 }
 
-export async function review(reviewId: string): Promise<Doc | null> {
-  const snapshot = await db().collection("reviews").doc(reviewId).get();
+export async function review(orgId: string, reviewId: string): Promise<Doc | null> {
+  const snapshot = await tenant(orgId).collection("reviews").doc(reviewId).get();
   if (!snapshot.exists) return null;
   const data = snapshot.data() as Doc;
-  const vendor = await db().collection("vendors").doc(String(data.vendor_id)).get();
+  const vendor = await tenant(orgId).collection("vendors").doc(String(data.vendor_id)).get();
   return { ...data, vendor: vendor.exists ? vendor.data() : {} };
 }
 
@@ -181,11 +214,11 @@ export async function review(reviewId: string): Promise<Doc | null> {
  * a decided review and an open one and the open one is the answer to *what is happening with
  * this vendor*. The decided one is still reachable from the vendor's own page.
  */
-export async function portfolio(): Promise<Doc[]> {
+export async function portfolio(orgId: string): Promise<Doc[]> {
   const [vendors, reviews, scores] = await Promise.all([
-    all("vendors"),
-    all("reviews"),
-    all("scores"),
+    all(orgId, "vendors"),
+    all(orgId, "reviews"),
+    all(orgId, "scores"),
   ]);
 
   const scoreBy = new Map(scores.map((s) => [s.review_id, s]));
@@ -217,15 +250,15 @@ export async function portfolio(): Promise<Doc[]> {
     .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")));
 }
 
-export async function vendorDossier(vendorId: string): Promise<Doc[]> {
-  const rows = await forVendor("dossiers", vendorId);
+export async function vendorDossier(orgId: string, vendorId: string): Promise<Doc[]> {
+  const rows = await forVendor(orgId, "dossiers", vendorId);
   return rows
     .filter((d) => !d.superseded)
     .sort((a, b) => String(b.written_at ?? "").localeCompare(String(a.written_at ?? "")));
 }
 
-export async function reviewsFor(vendorId: string): Promise<Doc[]> {
-  const rows = await forVendor("reviews", vendorId);
+export async function reviewsFor(orgId: string, vendorId: string): Promise<Doc[]> {
+  const rows = await forVendor(orgId, "reviews", vendorId);
   return rows.sort((a, b) => String(b.opened_at ?? "").localeCompare(String(a.opened_at ?? "")));
 }
 
@@ -233,38 +266,38 @@ export async function reviewsFor(vendorId: string): Promise<Doc[]> {
  * One review's material
  * ---------------------------------------------------------------------------------------- */
 
-export async function score(reviewId: string): Promise<Doc | null> {
-  const snapshot = await db().collection("scores").doc(reviewId).get();
+export async function score(orgId: string, reviewId: string): Promise<Doc | null> {
+  const snapshot = await tenant(orgId).collection("scores").doc(reviewId).get();
   return snapshot.exists ? (snapshot.data() as Doc) : null;
 }
 
-export async function memo(reviewId: string): Promise<string> {
-  const snapshot = await db().collection("memos").doc(reviewId).get();
+export async function memo(orgId: string, reviewId: string): Promise<string> {
+  const snapshot = await tenant(orgId).collection("memos").doc(reviewId).get();
   return snapshot.exists ? String((snapshot.data() as Doc).text ?? "") : "";
 }
 
-export async function findings(reviewId: string): Promise<Doc[]> {
-  const rows = await forReview("findings", reviewId);
+export async function findings(orgId: string, reviewId: string): Promise<Doc[]> {
+  const rows = await forReview(orgId, "findings", reviewId);
   return rows.sort((a, b) => String(a.finding_id).localeCompare(String(b.finding_id)));
 }
 
-export async function answers(reviewId: string): Promise<Doc[]> {
-  const rows = await forReview("qa_responses", reviewId);
+export async function answers(orgId: string, reviewId: string): Promise<Doc[]> {
+  const rows = await forReview(orgId, "qa_responses", reviewId);
   return rows.sort((a, b) => String(a.question_id ?? "").localeCompare(String(b.question_id ?? "")));
 }
 
-export async function screenings(reviewId: string): Promise<Doc[]> {
-  const rows = await forReview("screenings", reviewId);
+export async function screenings(orgId: string, reviewId: string): Promise<Doc[]> {
+  const rows = await forReview(orgId, "screenings", reviewId);
   return rows.sort((a, b) => String(a.origin_ref ?? "").localeCompare(String(b.origin_ref ?? "")));
 }
 
-export async function approvals(reviewId: string): Promise<Doc[]> {
-  const rows = await forReview("approvals", reviewId);
+export async function approvals(orgId: string, reviewId: string): Promise<Doc[]> {
+  const rows = await forReview(orgId, "approvals", reviewId);
   return rows.sort((a, b) => String(a.issued_at ?? "").localeCompare(String(b.issued_at ?? "")));
 }
 
-export async function messages(reviewId: string): Promise<Doc[]> {
-  const rows = await forReview("inbox", reviewId);
+export async function messages(orgId: string, reviewId: string): Promise<Doc[]> {
+  const rows = await forReview(orgId, "inbox", reviewId);
   return rows.sort((a, b) => String(b.sent_at ?? "").localeCompare(String(a.sent_at ?? "")));
 }
 
@@ -276,13 +309,13 @@ export async function messages(reviewId: string): Promise<Doc[]> {
  * the Evidence agent resolved against the organisation's own approved-vendor list — the one
  * collection in the system with readers and no writer.
  */
-export async function chain(vendorId: string): Promise<Doc[]> {
-  const rows = await forVendor("subprocessors", vendorId);
+export async function chain(orgId: string, vendorId: string): Promise<Doc[]> {
+  const rows = await forVendor(orgId, "subprocessors", vendorId);
   return rows.sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")));
 }
 
-export async function cards(reviewId: string): Promise<Doc[]> {
-  const rows = await forReview("dashboard_events", reviewId);
+export async function cards(orgId: string, reviewId: string): Promise<Doc[]> {
+  const rows = await forReview(orgId, "dashboard_events", reviewId);
   return rows.sort((a, b) => String(a.at ?? "").localeCompare(String(b.at ?? "")));
 }
 
@@ -293,11 +326,11 @@ export async function cards(reviewId: string): Promise<Doc[]> {
  * happened over days, and splitting "what happened" from "why" into two lists would make the
  * reader do the merge in their head.
  */
-export async function timeline(reviewId: string): Promise<Doc[]> {
+export async function timeline(orgId: string, reviewId: string): Promise<Doc[]> {
   const [events, reasoning, tierCards] = await Promise.all([
-    forReview("events", reviewId),
-    forReview("decisions", reviewId),
-    forReview("dashboard_events", reviewId),
+    forReview(orgId, "events", reviewId),
+    forReview(orgId, "decisions", reviewId),
+    forReview(orgId, "dashboard_events", reviewId),
   ]);
 
   const entries: Doc[] = [
@@ -323,11 +356,11 @@ export async function timeline(reviewId: string): Promise<Doc[]> {
  * ---------------------------------------------------------------------------------------- */
 
 /** Every finding in the ledger, newest review first, with its vendor resolved. */
-export async function allFindings(limit = 300): Promise<Doc[]> {
+export async function allFindings(orgId: string, limit = 300): Promise<Doc[]> {
   const [rows, reviews, vendors] = await Promise.all([
-    all("findings", 2000),
-    all("reviews"),
-    all("vendors"),
+    all(orgId, "findings", 2000),
+    all(orgId, "reviews"),
+    all(orgId, "vendors"),
   ]);
 
   const reviewBy = new Map(reviews.map((r) => [r.review_id, r]));
@@ -355,11 +388,11 @@ export async function allFindings(limit = 300): Promise<Doc[]> {
  * verdicts merged, which is also the only form in which the question *is this document
  * admissible* has an answer: admissibility is a property of all its verdicts together.
  */
-export async function evidenceDocuments(limit = 200): Promise<Doc[]> {
+export async function evidenceDocuments(orgId: string, limit = 200): Promise<Doc[]> {
   const [rows, reviews, vendors] = await Promise.all([
-    all("screenings", 2000),
-    all("reviews"),
-    all("vendors"),
+    all(orgId, "screenings", 2000),
+    all(orgId, "reviews"),
+    all(orgId, "vendors"),
   ]);
 
   const reviewBy = new Map(reviews.map((r) => [r.review_id, r]));
@@ -438,8 +471,8 @@ export async function evidenceDocuments(limit = 200): Promise<Doc[]> {
  * prove a grant, and a probe is not a signal. The tests now sweep after themselves, and this
  * keeps a monitoring screen from drawing a blank row if anything else ever writes one.
  */
-export async function signals(): Promise<Doc[]> {
-  const [rows, vendors] = await Promise.all([all("tasks"), all("vendors")]);
+export async function signals(orgId: string): Promise<Doc[]> {
+  const [rows, vendors] = await Promise.all([all(orgId, "tasks"), all(orgId, "vendors")]);
   const vendorBy = new Map(vendors.map((v) => [v.vendor_id ?? v.id, v]));
   return rows
     .filter((t) => t.signal_id && t.title)
@@ -448,8 +481,8 @@ export async function signals(): Promise<Doc[]> {
 }
 
 /** Triage cards the Watchdog raised for a person rather than acting on. */
-export async function triageCards(): Promise<Doc[]> {
-  const snapshot = await db()
+export async function triageCards(orgId: string): Promise<Doc[]> {
+  const snapshot = await tenant(orgId)
     .collection("dashboard_events")
     .where("kind", "==", "watchdog_triage")
     .limit(200)
@@ -466,11 +499,11 @@ export async function triageCards(): Promise<Doc[]> {
  * console names that command rather than shelling out to it — a read-only surface that could
  * start a process is a read-only surface in name.
  */
-export async function binders(): Promise<Doc[]> {
+export async function binders(orgId: string): Promise<Doc[]> {
   const [reviews, vendors, scores] = await Promise.all([
-    all("reviews"),
-    all("vendors"),
-    all("scores"),
+    all(orgId, "reviews"),
+    all(orgId, "vendors"),
+    all(orgId, "scores"),
   ]);
   const vendorBy = new Map(vendors.map((v) => [v.vendor_id ?? v.id, v]));
   const scoreBy = new Map(scores.map((s) => [s.review_id, s]));
@@ -494,12 +527,12 @@ export async function binders(): Promise<Doc[]> {
  * is. Bounded hard: this is the collection that grows fastest, and the page says what it is
  * showing out of what exists.
  */
-export async function activity(limit = 250): Promise<{ rows: Doc[]; total: number }> {
+export async function activity(orgId: string, limit = 250): Promise<{ rows: Doc[]; total: number }> {
   const [events, reasoning, vendors, reviews] = await Promise.all([
-    all("events", 3000),
-    all("decisions", 3000),
-    all("vendors"),
-    all("reviews"),
+    all(orgId, "events", 3000),
+    all(orgId, "decisions", 3000),
+    all(orgId, "vendors"),
+    all(orgId, "reviews"),
   ]);
 
   const vendorBy = new Map(vendors.map((v) => [v.vendor_id ?? v.id, v]));
@@ -545,13 +578,13 @@ export type Overview = {
  * none is cached: an operator glancing at this screen is deciding whether to act, and a stale
  * count is worse than a slow page.
  */
-export async function overview(): Promise<Overview> {
+export async function overview(orgId: string): Promise<Overview> {
   const [reviews, vendors, scores, findingRows, cardRows] = await Promise.all([
-    all("reviews"),
-    all("vendors"),
-    all("scores"),
-    all("findings", 2000),
-    all("dashboard_events", 2000),
+    all(orgId, "reviews"),
+    all(orgId, "vendors"),
+    all(orgId, "scores"),
+    all(orgId, "findings", 2000),
+    all(orgId, "dashboard_events", 2000),
   ]);
 
   const vendorBy = new Map(vendors.map((v) => [v.vendor_id ?? v.id, v]));
