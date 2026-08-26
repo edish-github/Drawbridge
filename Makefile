@@ -1,5 +1,6 @@
 .PHONY: help bootstrap bootstrap-dry rules emulators emulators-stop seed reset run-local dev-ui open-review \
-        deploy demo demo-fixtures demo-crash demo-second binder dashboard teardown test lint probe
+        deploy demo demo-fixtures demo-crash demo-second binder dashboard teardown test lint probe \
+        graph replay console corpus
 
 PYTHON ?= python
 
@@ -76,6 +77,28 @@ demo-crash:     ## kill the worker mid-send, restart it, and finish the review
 demo-second:    ## review the same vendor twice and show what the second one already knew
 	$(UNSCREENED) $(PYTHON) -m scenarios.second_review --vendor $(or $(VENDOR),datadynamo)
 
+# The graph is data, so the picture and the dashboard's copy of it are outputs rather than
+# artefacts somebody maintains. Regenerates docs/diagrams/src/23-review-graph.mmd and
+# services/dashboard/lib/graph.json; tests/test_graph_ui.py fails if the committed copies are
+# stale, and scripts/check_contracts.py --check graph fails if the graph stopped describing the
+# code. Rendering the .mmd to SVG and PNG is the mermaid loop in docs/diagrams/README.md.
+graph:          ## regenerate the review graph: diagram 23 source and the dashboard's copy
+	$(PYTHON) -m scripts.graph_dump --format mermaid
+	$(PYTHON) -m scripts.graph_dump --format json
+	@$(PYTHON) -m scripts.graph_dump --format text
+
+# The console is TypeScript and the fleet is Python, so the graph and the policy reach the screen
+# through generated files rather than being declared twice. tests/test_console.py regenerates and
+# diffs, so a stale copy fails the suite rather than quietly showing last week's rubric.
+console:        ## regenerate what the operator console reads: the graph and the policy snapshot
+	$(PYTHON) -m scripts.graph_dump --format json
+	$(PYTHON) -m scripts.policy_dump
+
+# One review's actual path through the graph, reconstructed from the ledger. Reads only records
+# written for other reasons, so it works on reviews that ran before the projection existed.
+replay:         ## project one review onto the graph (REVIEW=<id>)
+	$(PYTHON) -m scripts.graph_dump --review $(REVIEW)
+
 corpus:         ## run the injection corpus and write the measured detection table
 	$(UNSCREENED) $(PYTHON) -m scripts.corpus_run
 
@@ -85,7 +108,7 @@ binder:         ## render a review's audit binder to HTML (REVIEW=<id>)
 # The emulator partitions on project id, so the dashboard has to read under the same one the
 # fleet writes under. .env is the single place that is configured, so the target reads it rather
 # than restating a default that would drift.
-dashboard: emulators ## read-only operator view at localhost:3000
+dashboard: emulators console ## the operator console at localhost:3000
 	@set -a; [ -f .env ] && . ./.env; set +a; \
 		export FIRESTORE_EMULATOR_HOST=$${FIRESTORE_EMULATOR_HOST:-localhost:8080}; \
 		cd services/dashboard && npm install --silent --no-audit --no-fund && npm run dev
@@ -96,8 +119,13 @@ teardown:       ## delete everything except the dashboard service
 test:           ## run the test suite
 	pytest -q
 
-lint:           ## static checks
+# Two kinds of static check, and the second is the one that catches design drift rather than
+# style. check_contracts diffs the things that are written down in more than one place —
+# topics, the rubric, the question bank, the permission matrix, and the review graph against
+# the code that executes it.
+lint:           ## static checks: style, then the cross-file contracts
 	ruff check .
+	$(PYTHON) -m scripts.check_contracts
 
 probe:          ## capability probe, writes infra/CAPABILITY-REPORT.md
 	$(PYTHON) -m scripts.probe_geap

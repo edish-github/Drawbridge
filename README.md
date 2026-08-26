@@ -78,6 +78,33 @@ nobody can verify, and the replay **refuses** rather than resending. `make demo-
 retrieval index over screened chunks. The third is what makes a second review open already
 knowing what the first one found.
 
+### The graph is declared, checked and generated — and nothing executes it
+
+The diagram above is five services. The *work* is twenty-eight nodes, and they are declared as
+data in [`shared/graph.py`](shared/graph.py): seven node kinds, three routers, two joins, four
+bounded cycles, and a contract per node saying what it takes, produces, reads, writes and is
+structurally forbidden.
+
+```
+make graph                # regenerate diagram 23 and the dashboard's copy
+make replay REVIEW=<id>   # one review's actual path, reconstructed from the ledger
+```
+
+**Nothing dispatches from it.** There is no graph runner, because a graph runner is a place for
+the review to live and a place for the review to live is a process whose death loses it. Dispatch
+is still Pub/Sub; the review's position is still a checkpointed row and an unacked message; `make
+demo-crash` still works for the same reason it always did.
+
+What a declared graph buys is that it can be **checked against the code**. `make lint` diffs it
+against the subscriber's handler table, the event contract's state expectations, the transition
+table and the permission matrix. On its first run it found a real bug: the Watchdog writes the
+`reviews` collection when it opens a linked re-review and no matrix row granted it, so the
+generated Firestore rules denied the write — the re-review would have failed the first time real
+IAM was applied and passed every local test until then.
+
+The projection reads only what the audit binder already reads, so it needs **no new collection
+and no new IAM row**, and it works on reviews that ran before it existed.
+
 ## 30-minute spin-up
 
 Nothing below needs a Google Cloud project. This is the path a judge runs first, and it is free.
@@ -343,20 +370,48 @@ monitoring. HTML with a print stylesheet, rendered in about fifty milliseconds.
 graph, because a document that could be steered by the content it reports on is worse than no
 document.
 
-## The dashboard
+## The operator console
 
 ```
 make dashboard
 ```
 
-Read-only over `reviews`, `dashboard_events`, `decisions` and `scores`. Three screens: the
-queue filtered to what needs a person, the review timeline with every entry expandable to the
-agent, goal, decision, trace id and idempotency key, and the gate card carrying the memo, the
-findings with their provenance labels and the per-domain arithmetic.
+Eleven screens over the ledger, built to the design in `Drawbridge.html`:
 
-The decision controls are inert by design. The dashboard holds no signing key and there is no
-write path in it — if a surface every operator can reach could mint an approval, the gateway
-refusing to sign would be decorative. The card names the command that issues the token instead.
+| | |
+|---|---|
+| Overview | What needs a person today, portfolio posture, throughput, live fleet state |
+| Queue | Every review with its state, tier, score, elapsed days and model cost |
+| Vendors · Vendor | The portfolio, and one vendor across every review it has had |
+| Review · Gate · Graph | The timeline, the decision card, and the path through the review graph |
+| Monitoring | What the Watchdog has seen since the reviews closed |
+| Evidence | Every screened document and what each detector said |
+| Findings | Every conclusion, labelled arithmetic or judgement |
+| Audit Binders | What an auditor receives, and what is in one |
+| Agent Registry | What each agent may touch, and what it structurally cannot |
+| Activity | The immutable record, events and reasoning merged |
+| Settings | The policy the fleet runs on |
+
+Three of these are worth singling out.
+
+**Agent Registry** is generated from the node contracts in `shared/graph.py`, which CI diffs
+against `infra/iam/permission-matrix.yaml`. It cannot show a permission the matrix does not
+grant, so the least-privilege claim stops being a table in this README and becomes something a
+reader can check beside the work.
+
+**Evidence** makes the same four-way distinction `shared.armor` does, rather than a softer one:
+*blocked*, *not a verdict* (the stub or a seeded fixture ran the pipeline shape and no detector),
+*incomplete* (a critical filter did not execute), *clean*. A demo run shows most rows as *not a
+verdict*, which is the honest thing for it to say.
+
+**Settings** reads `rubric.yaml` and the permission matrix and cannot edit either. Policy lives
+in version control, not in a form: a change to the rubric is a diff somebody reviewed, and the
+plan version it produces is recorded in every affected binder.
+
+**There is no write path in the whole app** — no API route, no mutation, no signing key. If a
+surface every operator can reach could mint an approval, the gateway refusing to sign would be
+decorative. The gate card names the command that issues the token instead.
+`tests/test_console.py` asserts all of that against the source tree.
 
 ## Synthetic data
 

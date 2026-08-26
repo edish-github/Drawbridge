@@ -42,6 +42,17 @@ jobs:
       - name: Lint
         run: ruff check .
 
+      # Here rather than in the `contracts` job below, which installs pyyaml alone: this check
+      # imports the subscriber's handler table, the event contract and the planner's step
+      # vocabulary in order to diff the declared graph against them, so it needs the package.
+      - name: The declared graph matches the code that executes it
+        run: python scripts/check_contracts.py --check graph
+        env:
+          RUNTIME_MODE: local
+          GEMINI_API_KEY: ci-placeholder-no-model-calls
+          FIRESTORE_EMULATOR_HOST: localhost:8080
+          PUBSUB_EMULATOR_HOST: localhost:8085
+
       - name: Test
         # No model call and no cloud call: the emulators need no credentials and no billing
         # account, so the resume and idempotency suites run on every push for free.
