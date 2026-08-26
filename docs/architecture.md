@@ -1,6 +1,6 @@
 # Architecture
 
-The system as it is. Eighteen amendments were recorded during the build where the implementation
+The system as it is. Twenty amendments were recorded during the build where the implementation
 disagreed with the plan; every one that changed the design is folded into the text below rather
 than listed as a correction, and [`CHANGELOG-amendments.md`](../CHANGELOG-amendments.md) keeps
 the record of what moved and why.
@@ -386,12 +386,135 @@ because policy lives in version control and a change to the rubric is a diff som
 The console and the audit binder share one palette; the diagrams keep the older slate one. Those
 are documentation *about* the system rather than output *from* it.
 
+## Multi-tenancy
+
+![System architecture](diagrams/svg/01-system-architecture.svg)
+
+Every customer's data lives under `orgs/{org_id}/`. A review is `orgs/acme/reviews/rev-1`, its
+findings are `orgs/acme/findings/…`, and there is no document in the product that belongs to no
+organisation.
+
+**Path-based rather than a filter field, and the difference is the whole point.** The obvious
+design is an `org_id` column and a `where("org_id", "==", …)` on every query. It is also the
+design where one forgotten clause returns another customer's evidence: the query succeeds, the
+page renders, nothing goes red. Under a path the same mistake cannot be made — there is no path
+to a collection without naming the org that owns it, so a missing scope is a `TenancyError` at the
+call site rather than a disclosure in production.
+
+`org_id` is *also* stamped on each document. That is not redundancy: the path is the enforcement,
+the field is the provenance, and a row lifted into an export or a restored backup still says whose
+it is.
+
+**Three collections are global**, because they are how organisations exist: `orgs`, `users`,
+`memberships`. Everything else — all twenty-three in the permission matrix — is per-tenant.
+
+**Nothing defaults a tenant.** `shared.tenancy.current_org()` raises rather than falling back;
+there is no "default organisation" anywhere in the module, and `tests/test_tenancy.py` asserts
+that from the source. A fallback is the single most dangerous line a multi-tenant system can
+contain, because it turns a missing scope from a crash into a disclosure.
+
+The worker adopts one tenant per message, from the envelope, and restores the previous scope on
+the way out — exception or not. That is safe here because the pull loop is single-threaded, which
+it already was for the kill-and-resume demo.
+
+Cross-tenant reads exist and have their own name: `tenancy.across_orgs(...)`. Every caller is
+findable by grepping for it, and a test asserts the list is empty.
+
+## Identity
+
+Authentication is delegated to Google Identity Platform. A security product that rolls its own
+password hashing has already lost the argument it exists to make, and in cloud the console never
+receives a password at all — the browser authenticates against Identity Platform directly and the
+server only ever sees a verified token.
+
+**Authorisation is ours.** Four roles, and they are not a hierarchy:
+
+| Role | May |
+|---|---|
+| `viewer` | read everything in the workspace, change nothing |
+| `analyst` | open reviews, mark a reply thread complete, resolve a parked review |
+| `approver` | everything an analyst may, plus release a human gate |
+| `admin` | everything, plus membership and workspace settings |
+
+`approver` and `admin` differ in kind rather than degree. An administrator who manages billing has
+no business accepting security risk by default, and a numeric level would grant it silently.
+
+**Memberships key on the identity provider's subject, never on an email.** An address can be
+reassigned to a different person by whoever runs the mail domain, and an audit record naming an
+approver by an address somebody else now owns is worse than one naming nobody.
+
+**Roles are read per request, from the membership document, never from the cookie.** A revoked
+approver loses the gate on their next page load rather than in twelve hours.
+
+The last administrator of an organisation cannot be demoted or removed. An organisation with no
+administrator is one nobody can ever get back into, and it is reachable by one careless dropdown.
+
+## The services
+
+| Service | Identity | Public | What only it can do |
+|---|---|---|---|
+| Console | `sa-dashboard` | yes | Sessions, workflow writes. No signing key. |
+| Portal | `sa-portal` | yes | Accept vendor answers and uploads. Cannot read quarantine back. |
+| Approvals | `sa-approvals` | no | Hold the private key. The only thing that can create a human decision. |
+| Binder | `sa-binder` | no | Render an audit binder. No write to the ledger at all. |
+| Screening | `sa-armor` | no | Touch quarantine. Structurally incapable of a model call. |
+| Worker | `sa-orchestrator` | — | Pull events and dispatch to the agents. |
+
+**The approval service does not trust its caller.** The console proxies a request on behalf of a
+signed-in person; the approval service re-verifies that person's token and re-reads their
+membership before it signs. A service that accepted "the console says Alex is an approver" would
+have its security bounded by the console never being wrong, and the console is the surface every
+reviewer can reach.
+
+### Where the console's write line is drawn
+
+The console may perform **workflow** writes — open a review, mark replies complete, resolve a
+park. It may not write `approvals`, `findings`, `scores`, `memos`, `screenings`,
+`evidence_chunks`, `subprocessors`, `dossiers` or `approval_tokens_spent`. The line is structural
+rather than by role: an administrator may not edit a finding either.
+
+That is a change from the previous claim, which was "no write path at all", and it is stated
+rather than eroded. A product where opening a review needs a terminal is not a product; a product
+where a screen can mint an approval has no human gate.
+
+## The vendor portal
+
+A vendor has no account. They are somebody at another company who was emailed sixty questions and
+would rather be doing something else, and asking them to register is how a three-day review
+becomes a six-week one.
+
+So the portal authenticates a **signed link**, scoped to one review and expiring in ninety days.
+It carries the org, the review and the expiry, and deliberately no role or capability — a link
+that could widen its own permissions would be a link worth stealing. It is a bearer credential,
+which is the same trust model as every "click here to continue" email ever sent, and that is
+stated rather than assumed.
+
+Everything about the page follows from its audience: answers save as they are typed, the page
+reopens where it was left, it works with JavaScript disabled, and every refusal — expired,
+forged, closed, absent — renders the same page, because a vendor cannot act on the difference and
+a portal that distinguished them would confirm which review ids exist.
+
+Uploads land in quarantine, which the portal's identity can write and cannot read. That is what
+makes *no agent has a code path into quarantine* true rather than aspirational.
+
+## Mail
+
+`shared/mail.py` sits behind the gateway tool the fleet already registered. Three transports —
+a ledger append for local mode and the test suite, SMTP, or a provider API — and **every one of
+them writes the ledger row**, so "the vendor was contacted" is counted the same way by the crash
+tests, the audit binder and a production deployment.
+
+Outbound mail is sent from `review+{org}.{review}@{domain}`, so an inbound reply routes to the
+right tenant and the right review without anybody parsing a subject line. Subject lines get
+edited; a plus-address survives being replied to from a phone.
+
 ## Data model
 
 ![Firestore data model](diagrams/svg/13-data-model-er.svg)
 
-Twenty-three collections, every one of them named in the permission matrix and enforced at
-collection level by generated Firestore rules. See [Security](security.md).
+Twenty-six collections — twenty-three per tenant plus three global — every one named in the
+permission matrix and enforced by generated Firestore rules, at collection level and, for the
+tenanted ones, under the organisation that owns them. See [Security](security.md).
 
 ## Failure semantics
 

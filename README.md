@@ -370,6 +370,23 @@ monitoring. HTML with a print stylesheet, rendered in about fifty milliseconds.
 graph, because a document that could be steered by the content it reports on is worse than no
 document.
 
+## Signing up
+
+Drawbridge is multi-tenant. Every customer's data lives under `orgs/{org_id}/` — a path, not a
+filter field, so a query that forgets its scope is a crash rather than another customer's evidence
+on somebody's screen. The first person to sign up creates a workspace and becomes its
+administrator; everyone else joins by invitation.
+
+Four roles, and they are not a hierarchy. `viewer` reads. `analyst` moves reviews through the
+workflow. `approver` releases a human gate — the role a signed approval is minted against, so it
+is the one that carries weight in an audit. `admin` manages membership and settings, and has no
+business accepting security risk by default, which is why `approver` is not simply a lower rung.
+
+Authentication is Google Identity Platform's. In cloud the console never receives a password: the
+browser authenticates directly and the server only ever sees a verified token. Approving a gate
+asks for it again — a session cookie left open on an unattended laptop is not evidence that the
+named person was present.
+
 ## The operator console
 
 ```
