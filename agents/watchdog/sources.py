@@ -31,6 +31,7 @@ from datetime import date, datetime, timedelta
 from pydantic import BaseModel
 
 from agents.watchdog.fetch import TOOL_FETCH_URL
+from shared import tenancy as tenant
 from shared.gateway import FEED_ALLOWLIST, PolicyViolation, call_tool
 
 log = logging.getLogger("drawbridge.watchdog.sources")
@@ -106,12 +107,10 @@ def monitored_vendor_ids() -> list[str]:
     """
     from google.cloud.firestore_v1 import FieldFilter
 
-    from shared.clients import firestore_client
     from shared.domain import ReviewState
 
     docs = (
-        firestore_client()
-        .collection("reviews")
+        tenant.collection("reviews")
         .where(
             filter=FieldFilter(
                 "state", "in", [ReviewState.DECIDED.value, ReviewState.MONITORED.value]

@@ -46,6 +46,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+from shared import tenancy as tenant
 from shared.memory import Dossier
 
 log = logging.getLogger("drawbridge.recall")
@@ -203,13 +204,11 @@ def _domains_with_findings(prior_review_id: str | None) -> set[str]:
 
     from google.cloud.firestore_v1 import FieldFilter
 
-    from shared.clients import firestore_client
     from shared.domain import RUBRIC_DOMAINS
 
     try:
         docs = (
-            firestore_client()
-            .collection("findings")
+            tenant.collection("findings")
             .where(filter=FieldFilter("review_id", "==", prior_review_id))
             .stream()
         )

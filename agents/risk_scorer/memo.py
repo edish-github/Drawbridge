@@ -29,8 +29,8 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
+from shared import tenancy as tenant
 from shared.armor import MATCH_FOUND, ScreenResult
-from shared.clients import firestore_client
 from shared.domain import Finding, ScoreResult
 
 log = logging.getLogger("drawbridge.memo")
@@ -106,7 +106,7 @@ def write_memo(
         raise ValueError(f"the memo call returned nothing for review {review_id}")
 
     ref = f"memo:{review_id}"
-    firestore_client().collection(COLLECTION_MEMOS).document(review_id).set(
+    tenant.collection(COLLECTION_MEMOS).document(review_id).set(
         {
             "review_id": review_id,
             "text": text,
@@ -125,7 +125,7 @@ def write_memo(
 
 def read_memo(review_id: str) -> str:
     """Return the memo text, or an empty string when none has been written."""
-    snap = firestore_client().collection(COLLECTION_MEMOS).document(review_id).get()
+    snap = tenant.collection(COLLECTION_MEMOS).document(review_id).get()
     return str((snap.to_dict() or {}).get("text", ""))
 
 
@@ -145,9 +145,7 @@ def raise_adversarial_conduct(review_id: str, screen: ScreenResult) -> None:
     from shared.armor import store_inert_excerpt
     from shared.context import AgentContext
     from shared.events import TOPIC_REVIEW_RESCORE, publish
-
-    db = firestore_client()
-    review = db.collection("reviews").document(review_id).get().to_dict() or {}
+    review = tenant.collection("reviews").document(review_id).get().to_dict() or {}
     vendor_id = review.get("vendor_id", "")
 
     finding = Finding(
@@ -165,13 +163,18 @@ def raise_adversarial_conduct(review_id: str, screen: ScreenResult) -> None:
         ),
         evidence_ref=store_inert_excerpt(review_id, screen.excerpt or ""),
     )
-    db.collection("findings").document(finding.finding_id).set(finding.model_dump(mode="json"))
+    tenant.collection("findings").document(finding.finding_id).set(finding.model_dump(mode="json"))
 
-    db.collection("reviews").document(review_id).set({"adversarial_conduct": True}, merge=True)
+    tenant.collection("reviews").document(review_id).set({"adversarial_conduct": True}, merge=True)
     if vendor_id:
-        db.collection("vendors").document(vendor_id).set({"adversarial_flag": True}, merge=True)
+        tenant.collection("vendors").document(vendor_id).set({"adversarial_flag": True}, merge=True)
 
-    ctx = AgentContext(review_id=review_id, agent="risk_scorer", trace_id="")
+    ctx = AgentContext(
+        org_id=tenant.current_org(),
+        review_id=review_id,
+        agent="risk_scorer",
+        trace_id="",
+    )
     publish(TOPIC_REVIEW_RESCORE, review_id, {"reason": "adversarial_conduct"}, ctx=ctx)
 
     log.warning(

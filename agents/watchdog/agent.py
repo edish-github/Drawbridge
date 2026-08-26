@@ -37,7 +37,7 @@ from google.adk import Agent
 
 from agents.watchdog.relevance import Action, evaluate
 from agents.watchdog.sources import Signal, expiry_signals, fetch_feed_signals
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 from shared.config import settings
 from shared.context import AgentContext, context_for
 from shared.domain import RelevanceJudgement, Review, ReviewState, Vendor
@@ -189,15 +189,14 @@ def resolve_vendor(signal: Signal) -> Vendor | None:
     a company, and matching that to a vendor is what ``relevance.matches_identity`` decides — so
     this only narrows the candidate set and never decides a match on its own.
     """
-    db = firestore_client()
 
     if signal.source == "dossier":
-        raw = db.collection("vendors").document(signal.vendor_hint).get().to_dict()
+        raw = tenant.collection("vendors").document(signal.vendor_hint).get().to_dict()
         return Vendor.model_validate(raw) if raw else None
 
     from agents.watchdog.relevance import matches_identity
 
-    for doc in db.collection("vendors").stream():
+    for doc in tenant.collection("vendors").stream():
         try:
             vendor = Vendor.model_validate(doc.to_dict())
         except Exception as exc:  # noqa: BLE001 — one bad row never stops the sweep
@@ -251,7 +250,7 @@ def open_rereview(ctx: AgentContext, vendor: Vendor, signal: Signal) -> str | No
         opened_at=datetime.now(UTC),
         reopened_from=previous,
     )
-    firestore_client().collection("reviews").document(review.review_id).set(
+    tenant.collection("reviews").document(review.review_id).set(
         {
             **review.model_dump(mode="json"),
             "opened_by": "watchdog",
@@ -263,7 +262,12 @@ def open_rereview(ctx: AgentContext, vendor: Vendor, signal: Signal) -> str | No
         TOPIC_REVIEW_INTAKE,
         review.review_id,
         {"vendor_id": vendor.vendor_id, "reopened_from": previous, "signal": signal.title},
-        ctx=AgentContext(review_id=review.review_id, agent="watchdog", trace_id=ctx.trace_id),
+        ctx=AgentContext(
+            org_id=tenant.current_org(),
+            review_id=review.review_id,
+            agent="watchdog",
+            trace_id=ctx.trace_id,
+        ),
     )
     log.warning(
         "review=%s opened for %s by the watchdog: %s (from review=%s)",
@@ -285,7 +289,7 @@ def raise_triage_card(
     things to whoever picks the card up: the first is "we are not sure this is your vendor", the
     second is "we are sure, and this is the fourth time".
     """
-    firestore_client().collection("dashboard_events").add(
+    tenant.collection("dashboard_events").add(
         {
             "review_id": latest_review_id(vendor.vendor_id) or "",
             "kind": "watchdog_triage",
@@ -325,14 +329,13 @@ def chain_depth(review_id: str | None) -> int:
     if not review_id:
         return 0
 
-    db = firestore_client()
     depth = 0
     seen: set[str] = set()
     current: str | None = review_id
 
     while current and depth < 64:
         seen.add(current)
-        doc = db.collection("reviews").document(current).get().to_dict() or {}
+        doc = tenant.collection("reviews").document(current).get().to_dict() or {}
         parent = doc.get("reopened_from")
         # A link already walked is a corrupt chain rather than a longer one. Counting it would
         # let a review pointing at itself read as one re-review deep, which is a budget spent on
@@ -352,12 +355,12 @@ def already_seen(signal_id: str) -> bool:
     reported by two outlets is two signals and one event — and a portfolio sweep that ran twice
     in a day must not open two reviews for it.
     """
-    return firestore_client().collection(COLLECTION_TASKS).document(signal_id).get().exists
+    return tenant.collection(COLLECTION_TASKS).document(signal_id).get().exists
 
 
 def record_signal(signal: Signal, vendor_id: str, action: Action) -> None:
     """Record the signal and what was decided about it, whatever was decided."""
-    firestore_client().collection(COLLECTION_TASKS).document(signal.signal_id).set(
+    tenant.collection(COLLECTION_TASKS).document(signal.signal_id).set(
         {
             "signal_id": signal.signal_id,
             "vendor_id": vendor_id,
@@ -376,8 +379,7 @@ def latest_review_id(vendor_id: str) -> str | None:
 
     docs = [
         d.to_dict()
-        for d in firestore_client()
-        .collection("reviews")
+        for d in tenant.collection("reviews")
         .where(filter=FieldFilter("vendor_id", "==", vendor_id))
         .stream()
     ]

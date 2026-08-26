@@ -46,8 +46,8 @@ from agents.orchestrator.planner import (
     load_vendor_record,
     tier_from,
 )
+from shared import tenancy as tenant
 from shared.checkpoint import recheckpoint, step_result
-from shared.clients import firestore_client
 from shared.domain import Review, TierChange
 from shared.idempotency import key_for
 
@@ -311,18 +311,16 @@ def classify(ctx, review_id: str, answers: list[dict]) -> list[ScopeClassificati
 def unclassified_answers(review_id: str) -> list[dict]:
     """Return free-text answers not yet mapped to a data-scope category."""
     from google.cloud.firestore_v1 import FieldFilter
-
-    db = firestore_client()
     done = {
         d.id.split(":", 1)[-1]
-        for d in db.collection(COLLECTION_CLASSIFICATIONS)
+        for d in tenant.collection(COLLECTION_CLASSIFICATIONS)
         .where(filter=FieldFilter("review_id", "==", review_id))
         .stream()
     }
 
     out = []
     for doc in (
-        db.collection(COLLECTION_RESPONSES)
+        tenant.collection(COLLECTION_RESPONSES)
         .where(filter=FieldFilter("review_id", "==", review_id))
         .stream()
     ):
@@ -350,8 +348,7 @@ def all_classifications(review_id: str) -> list[ScopeClassification]:
 
     out = []
     for doc in (
-        firestore_client()
-        .collection(COLLECTION_CLASSIFICATIONS)
+        tenant.collection(COLLECTION_CLASSIFICATIONS)
         .where(filter=FieldFilter("review_id", "==", review_id))
         .stream()
     ):
@@ -371,9 +368,8 @@ def record_classifications(review_id: str, classifications: list[ScopeClassifica
     Keyed by review and question, so a redelivered reply batch rewrites the same documents
     rather than spending a model call per delivery.
     """
-    db = firestore_client()
     for entry in classifications:
-        db.collection(COLLECTION_CLASSIFICATIONS).document(
+        tenant.collection(COLLECTION_CLASSIFICATIONS).document(
             f"{review_id}:{entry.question_id}"
         ).set(
             {
@@ -428,7 +424,12 @@ def replan(review: Review, new_tier: int, *, ctx=None) -> Plan:
 
     recheckpoint(
         "plan",
-        ctx or AgentContext(review_id=review.review_id, agent="orchestrator", trace_id=""),
+        ctx or AgentContext(
+            org_id=tenant.current_org(),
+            review_id=review.review_id,
+            agent="orchestrator",
+            trace_id="",
+        ),
         plan.model_dump(mode="json"),
     )
     return plan
@@ -452,8 +453,7 @@ def record_tier_change(review: Review, change: TierChange) -> None:
 
     payload = change.model_dump(mode="json")
     try:
-        db = firestore_client()
-        db.collection("reviews").document(review.review_id).set(
+        tenant.collection("reviews").document(review.review_id).set(
             {
                 "tier": change.to_tier,
                 "plan_version": review.plan_version + 1,
@@ -461,7 +461,7 @@ def record_tier_change(review: Review, change: TierChange) -> None:
             },
             merge=True,
         )
-        db.collection("dashboard_events").add(
+        tenant.collection("dashboard_events").add(
             {
                 "kind": "tier_change",
                 "review_id": review.review_id,
@@ -481,7 +481,7 @@ def record_tier_change(review: Review, change: TierChange) -> None:
 
 def vendor_of(review: Review):
     """Load the vendor record a review's tiering facts come from."""
-    raw = firestore_client().collection("vendors").document(review.vendor_id).get().to_dict()
+    raw = tenant.collection("vendors").document(review.vendor_id).get().to_dict()
     return load_vendor_record(raw or {"vendor_id": review.vendor_id, "name": "", "category": ""})
 
 

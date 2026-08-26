@@ -35,7 +35,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 from shared.context import AgentContext
 from shared.gateway import PolicyViolation, call_tool
 from shared.idempotency import key_for
@@ -71,8 +71,7 @@ _ORDINALS = {1: "first", 2: "second", 3: "third"}
 def followups_sent(review_id: str, question_id: str) -> int:
     """Return how many follow-ups have already gone out for this question."""
     snap = (
-        firestore_client()
-        .collection(COLLECTION_FOLLOWUPS)
+        tenant.collection(COLLECTION_FOLLOWUPS)
         .document(f"{review_id}:{question_id}")
         .get()
     )
@@ -89,8 +88,7 @@ def outstanding(review_id: str) -> dict[str, int]:
     from google.cloud.firestore_v1 import FieldFilter
 
     docs = (
-        firestore_client()
-        .collection(COLLECTION_FOLLOWUPS)
+        tenant.collection(COLLECTION_FOLLOWUPS)
         .where(filter=FieldFilter("review_id", "==", review_id))
         .stream()
     )
@@ -236,7 +234,7 @@ def _contact(review_id: str) -> tuple[str, str, str]:
     from shared.events import load_review
 
     review = load_review(review_id)
-    raw = firestore_client().collection("vendors").document(review.vendor_id).get().to_dict()
+    raw = tenant.collection("vendors").document(review.vendor_id).get().to_dict()
     raw = raw or {}
     contact = raw.get("contact") or {}
     name = contact.get("name", "")
@@ -255,7 +253,7 @@ def _plan_version(review_id: str) -> int:
 
 def _record(review_id: str, question_id: str, count: int) -> None:
     """Record the send inside the guarded call, so a crash cannot lose it and re-ask again."""
-    firestore_client().collection(COLLECTION_FOLLOWUPS).document(
+    tenant.collection(COLLECTION_FOLLOWUPS).document(
         f"{review_id}:{question_id}"
     ).set(
         {

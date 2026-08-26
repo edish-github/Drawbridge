@@ -35,8 +35,8 @@ import logging
 
 from google.adk import Agent
 
+from shared import tenancy as tenant
 from shared.checkpoint import step
-from shared.clients import firestore_client
 from shared.config import settings
 from shared.context import context_for
 from shared.domain import Finding, Review
@@ -134,7 +134,6 @@ def on_findings_ready(event: EventEnvelope, review: Review) -> None:
     from agents.risk_scorer.scoring import Flags, compute_score, explain, load_rubric
 
     ctx = context_for(event, agent="risk_scorer")
-    db = firestore_client()
 
     with span("risk_scorer.score", ctx) as s:
         findings = load_findings(review.review_id)
@@ -158,7 +157,7 @@ def on_findings_ready(event: EventEnvelope, review: Review) -> None:
             lambda: save_score(review.review_id, result, breakdown),
         )
 
-        vendor = db.collection("vendors").document(review.vendor_id).get().to_dict() or {}
+        vendor = tenant.collection("vendors").document(review.vendor_id).get().to_dict() or {}
         try:
             step(
                 STEP_MEMO,
@@ -231,8 +230,7 @@ def load_findings(review_id: str) -> list[Finding]:
     from google.cloud.firestore_v1 import FieldFilter
 
     docs = (
-        firestore_client()
-        .collection("findings")
+        tenant.collection("findings")
         .where(filter=FieldFilter("review_id", "==", review_id))
         .stream()
     )
@@ -243,7 +241,7 @@ def load_findings(review_id: str) -> list[Finding]:
 
 def adversarial_flag(review_id: str) -> bool:
     """Return whether Adversarial Conduct has been raised on this review."""
-    snap = firestore_client().collection("reviews").document(review_id).get()
+    snap = tenant.collection("reviews").document(review_id).get()
     return bool((snap.to_dict() or {}).get("adversarial_conduct", False))
 
 
@@ -262,8 +260,8 @@ def save_score(review_id, result, breakdown: list[str]) -> dict:
         "adversarial_applied": result.adversarial_applied,
         "arithmetic": breakdown,
     }
-    firestore_client().collection(COLLECTION_SCORES).document(review_id).set(doc)
-    firestore_client().collection("reviews").document(review_id).set(
+    tenant.collection(COLLECTION_SCORES).document(review_id).set(doc)
+    tenant.collection("reviews").document(review_id).set(
         {"score": result.score, "band": result.band}, merge=True
     )
     return doc

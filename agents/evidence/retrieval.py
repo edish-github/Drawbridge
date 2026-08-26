@@ -39,8 +39,8 @@ from __future__ import annotations
 import logging
 import math
 
+from shared import tenancy as tenant
 from shared.armor import CHUNK_COLLECTION
-from shared.clients import firestore_client
 from shared.config import settings
 from shared.domain import EvidenceChunk
 
@@ -86,8 +86,7 @@ def _knn_indexed(
     from google.cloud.firestore_v1.vector import Vector
 
     query = (
-        firestore_client()
-        .collection(CHUNK_COLLECTION)
+        tenant.collection(CHUNK_COLLECTION)
         .where(filter=FieldFilter("review_id", "==", review_id))
     )
     if doc_ref:
@@ -114,8 +113,7 @@ def _knn_bruteforce(
     from google.cloud.firestore_v1 import FieldFilter
 
     query = (
-        firestore_client()
-        .collection(CHUNK_COLLECTION)
+        tenant.collection(CHUNK_COLLECTION)
         .where(filter=FieldFilter("review_id", "==", review_id))
     )
     if doc_ref:
@@ -203,7 +201,7 @@ def resolve_chunk(chunk_id: str) -> EvidenceChunk | None:
     Returns ``None`` when the chunk no longer exists, which the binder renders as a broken
     provenance link rather than omitting the finding.
     """
-    snap = firestore_client().collection(CHUNK_COLLECTION).document(chunk_id).get()
+    snap = tenant.collection(CHUNK_COLLECTION).document(chunk_id).get()
     if not snap.exists:
         return None
     return EvidenceChunk.model_validate(snap.to_dict())
@@ -218,8 +216,7 @@ def all_chunks(review_id: str) -> list[EvidenceChunk]:
     from google.cloud.firestore_v1 import FieldFilter
 
     docs = (
-        firestore_client()
-        .collection(CHUNK_COLLECTION)
+        tenant.collection(CHUNK_COLLECTION)
         .where(filter=FieldFilter("review_id", "==", review_id))
         .stream()
     )

@@ -47,8 +47,8 @@ from datetime import UTC, datetime
 from google.adk import Agent
 
 from agents.orchestrator.closeout import remember_review
+from shared import tenancy as tenant
 from shared.checkpoint import step
-from shared.clients import firestore_client
 from shared.config import settings
 from shared.context import context_for
 from shared.domain import Review, ReviewPlan, ReviewState
@@ -176,10 +176,9 @@ def on_intake(event: EventEnvelope, review: Review) -> None:
     from agents.orchestrator.planner import Plan, generate_plan, load_vendor_record
 
     ctx = context_for(event, agent="orchestrator")
-    db = firestore_client()
 
     with span("orchestrator.intake", ctx) as s:
-        raw = db.collection("vendors").document(review.vendor_id).get().to_dict()
+        raw = tenant.collection("vendors").document(review.vendor_id).get().to_dict()
         if not raw:
             park(review.review_id, reason="vendor_record_missing")
             raise UnhandledEvent(

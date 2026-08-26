@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime, timedelta
 
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 from shared.context import AgentContext
 from shared.domain import Review, ReviewState
 from shared.gateway import PolicyViolation, call_tool
@@ -78,7 +78,7 @@ def schedule_chase(review_id: str, *, days: int = CHASE_INTERVAL_DAYS) -> dateti
     from shared.clock import now
 
     due = now() + timedelta(days=days)
-    firestore_client().collection("reviews").document(review_id).set(
+    tenant.collection("reviews").document(review_id).set(
         {FIELD_NEXT: due.isoformat()}, merge=True
     )
     return due
@@ -88,7 +88,7 @@ def chase_due(review_id: str) -> bool:
     """Return whether the scheduled chase time has passed."""
     from shared.clock import now
 
-    snap = firestore_client().collection("reviews").document(review_id).get()
+    snap = tenant.collection("reviews").document(review_id).get()
     raw = (snap.to_dict() or {}).get(FIELD_NEXT)
     if not raw:
         return False
@@ -97,7 +97,7 @@ def chase_due(review_id: str) -> bool:
 
 def chase_round(review_id: str) -> int:
     """Return how many chases have already been sent for this review."""
-    snap = firestore_client().collection("reviews").document(review_id).get()
+    snap = tenant.collection("reviews").document(review_id).get()
     return int((snap.to_dict() or {}).get(FIELD_ROUNDS, 0))
 
 
@@ -211,7 +211,7 @@ def stop_chasing(review: Review, outstanding_count: int) -> None:
 
 def _record_round(review_id: str, round_number: int) -> None:
     """Record the round inside the guarded send, so a crash cannot repeat a reminder."""
-    firestore_client().collection("reviews").document(review_id).set(
+    tenant.collection("reviews").document(review_id).set(
         {FIELD_ROUNDS: round_number, "last_chase_at": datetime.now(UTC).isoformat()}, merge=True
     )
 
@@ -223,7 +223,7 @@ def _due_date() -> str:
 
 
 def _contact(review: Review) -> tuple[str, str, str]:
-    raw = firestore_client().collection("vendors").document(review.vendor_id).get().to_dict()
+    raw = tenant.collection("vendors").document(review.vendor_id).get().to_dict()
     raw = raw or {}
     contact = raw.get("contact") or {}
     name = contact.get("name", "")

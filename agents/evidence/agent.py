@@ -37,8 +37,8 @@ from datetime import UTC, datetime
 
 from google.adk import Agent
 
+from shared import tenancy as tenant
 from shared.checkpoint import step
-from shared.clients import firestore_client
 from shared.config import settings
 from shared.context import context_for
 from shared.domain import Finding, FindingDraft, MemoryNote, Review
@@ -230,8 +230,7 @@ def clean_documents(review_id: str) -> list[str]:
     from google.cloud.firestore_v1 import FieldFilter
 
     docs = (
-        firestore_client()
-        .collection("screenings")
+        tenant.collection("screenings")
         .where(filter=FieldFilter("review_id", "==", review_id))
         .stream()
     )
@@ -258,8 +257,7 @@ def claims_for(review_id: str) -> list:
     }
 
     answers = (
-        firestore_client()
-        .collection("qa_responses")
+        tenant.collection("qa_responses")
         .where(filter=FieldFilter("review_id", "==", review_id))
         .stream()
     )
@@ -282,7 +280,7 @@ def claims_for(review_id: str) -> list:
 
 def service_being_bought(vendor_id: str) -> str:
     """Return the service named on the intake form, for the scope-coverage check."""
-    raw = firestore_client().collection("vendors").document(vendor_id).get().to_dict() or {}
+    raw = tenant.collection("vendors").document(vendor_id).get().to_dict() or {}
     return str((raw.get("intake") or {}).get("service_being_bought", ""))
 
 
@@ -356,9 +354,8 @@ def save_findings(findings: list[Finding]) -> int:
     summary — so a redelivery rewrites the same documents rather than duplicating a finding and
     doubling its penalty in the score.
     """
-    db = firestore_client()
     for finding in findings:
-        db.collection(COLLECTION_FINDINGS).document(finding.finding_id).set(
+        tenant.collection(COLLECTION_FINDINGS).document(finding.finding_id).set(
             finding.model_dump(mode="json")
         )
     return len(findings)

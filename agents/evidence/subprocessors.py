@@ -55,8 +55,8 @@ from pydantic import BaseModel, Field
 
 from agents.evidence.checks import rule_finding
 from agents.evidence.extractors import MAX_DOCUMENT_CHARS, read_clean_document
+from shared import tenancy as tenant
 from shared.armor import stamps_for
-from shared.clients import firestore_client
 from shared.domain import Finding, Subprocessor
 from shared.routing import generate
 
@@ -430,13 +430,13 @@ def announce_gap(review_id: str, vendor_id: str, chain: list[Subprocessor]) -> l
 
 
 def _vendor_name(vendor_id: str) -> str:
-    raw = firestore_client().collection("vendors").document(vendor_id).get().to_dict() or {}
+    raw = tenant.collection("vendors").document(vendor_id).get().to_dict() or {}
     return str(raw.get("name") or vendor_id)
 
 
 def declared_residency(vendor_id: str) -> list[str]:
     """Return the data-residency regions the intake form required, if it stated any."""
-    raw = firestore_client().collection("vendors").document(vendor_id).get().to_dict() or {}
+    raw = tenant.collection("vendors").document(vendor_id).get().to_dict() or {}
     stated = (raw.get("intake") or {}).get("data_residency_required") or []
     return [str(region).strip() for region in stated if str(region).strip()]
 
@@ -450,10 +450,9 @@ def chain_view(vendor_id: str) -> dict:
     """
     from google.cloud.firestore_v1 import FieldFilter
 
-    raw = firestore_client().collection("vendors").document(vendor_id).get().to_dict() or {}
+    raw = tenant.collection("vendors").document(vendor_id).get().to_dict() or {}
     docs = (
-        firestore_client()
-        .collection(COLLECTION_SUBPROCESSORS)
+        tenant.collection(COLLECTION_SUBPROCESSORS)
         .where(filter=FieldFilter("vendor_id", "==", vendor_id))
         .stream()
     )
@@ -496,7 +495,7 @@ def approved_vendor_register() -> dict[str, RegisterEntry]:
         register findings, logged in degraded mode.
     """
     try:
-        docs = firestore_client().collection(COLLECTION_REGISTER).stream()
+        docs = tenant.collection(COLLECTION_REGISTER).stream()
     except Exception as exc:  # noqa: BLE001 — an unreadable register degrades, never blocks
         log.warning("approved-vendor register unavailable: %s", exc)
         return {}
@@ -515,7 +514,7 @@ def approved_vendor_register() -> dict[str, RegisterEntry]:
 
 def save_subprocessor(vendor_id: str, sub: Subprocessor) -> str:
     """Persist one subprocessor and return its id."""
-    firestore_client().collection(COLLECTION_SUBPROCESSORS).document(
+    tenant.collection(COLLECTION_SUBPROCESSORS).document(
         sub.subprocessor_id
     ).set(sub.model_dump(mode="json"))
     return sub.subprocessor_id

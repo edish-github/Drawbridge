@@ -38,6 +38,7 @@ import hashlib
 import logging
 from datetime import UTC, datetime
 
+from shared import tenancy as tenant
 from shared.domain import MemoryNote, Review
 from shared.memory import NoteRejected, remember
 
@@ -210,20 +211,17 @@ def _outcome(review: Review) -> str:
 
 
 def _contact(vendor_id: str) -> str:
-    from shared.clients import firestore_client
 
-    raw = firestore_client().collection("vendors").document(vendor_id).get().to_dict() or {}
+    raw = tenant.collection("vendors").document(vendor_id).get().to_dict() or {}
     return str((raw.get("contact") or {}).get("email", ""))
 
 
 def _adversarial(review_id: str) -> bool:
     from google.cloud.firestore_v1 import FieldFilter
 
-    from shared.clients import firestore_client
 
     docs = (
-        firestore_client()
-        .collection("findings")
+        tenant.collection("findings")
         .where(filter=FieldFilter("review_id", "==", review_id))
         .where(filter=FieldFilter("domain", "==", "conduct"))
         .limit(1)

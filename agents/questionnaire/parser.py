@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 from shared.routing import generate
 
 log = logging.getLogger("drawbridge.parser")
@@ -145,15 +145,14 @@ def merge_responses(review_id: str, answers: list[ParsedAnswer], source: str) ->
     A later answer supersedes an earlier one for the same question and both are retained in
     the ledger, because the superseded answer is part of the audit record.
     """
-    db = firestore_client()
 
     for answer in answers:
         doc_id = f"{review_id}:{answer.question_id}"
-        ref = db.collection(COLLECTION_RESPONSES).document(doc_id)
+        ref = tenant.collection(COLLECTION_RESPONSES).document(doc_id)
 
         existing = ref.get().to_dict()
         if existing:
-            db.collection(COLLECTION_SUPERSEDED).add(
+            tenant.collection(COLLECTION_SUPERSEDED).add(
                 {**existing, "superseded_at": datetime.now(UTC).isoformat()}
             )
 
@@ -233,8 +232,7 @@ def _recorded(review_id: str) -> list[ParsedAnswer]:
     from google.cloud.firestore_v1 import FieldFilter
 
     docs = (
-        firestore_client()
-        .collection(COLLECTION_RESPONSES)
+        tenant.collection(COLLECTION_RESPONSES)
         .where(filter=FieldFilter("review_id", "==", review_id))
         .stream()
     )

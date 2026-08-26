@@ -37,8 +37,8 @@ from datetime import UTC, datetime
 from google.adk import Agent
 
 from shared import approvals
+from shared import tenancy as tenant
 from shared.checkpoint import completed_steps, step, step_result
-from shared.clients import firestore_client
 from shared.config import settings
 from shared.context import context_for
 from shared.domain import Review, ReviewState
@@ -174,14 +174,13 @@ def on_plan_ready(event: EventEnvelope, review: Review) -> None:
     from agents.questionnaire.generator import render_questionnaire, select_questions
 
     ctx = context_for(event, agent="questionnaire")
-    db = firestore_client()
 
     with span("questionnaire.first_contact", ctx) as s:
         plan = step_result(review.review_id, STEP_PLAN) or {}
         tier = int(plan.get("tier") or event.payload.get("tier") or review.tier)
         domains = list(plan.get("domains") or event.payload.get("domains") or [])
 
-        raw = db.collection("vendors").document(review.vendor_id).get().to_dict() or {}
+        raw = tenant.collection("vendors").document(review.vendor_id).get().to_dict() or {}
         vendor_name = raw.get("name", review.vendor_id)
         recipient = (raw.get("contact") or {}).get("email", "")
         if not recipient:
@@ -216,8 +215,16 @@ def on_plan_ready(event: EventEnvelope, review: Review) -> None:
             )
             return
 
+        # The link is minted per send rather than stored, so it carries this send's expiry and a
+        # revoked link is one nobody re-issues rather than one somebody has to remember to revoke.
+        from shared import tenancy
+        from shared.portal_links import url_for
+
         body = render_questionnaire(
-            questions, vendor_name=vendor_name, additional=bool(delivered)
+            questions,
+            vendor_name=vendor_name,
+            additional=bool(delivered),
+            portal_url=url_for(tenancy.current_org(), review.review_id),
         )
         subject = (
             f"Security review — {vendor_name} (Tier {tier})"
@@ -319,7 +326,7 @@ def already_delivered(review_id: str) -> set[str]:
     replaces the plan, and the questions the vendor received under the previous one are a fact
     about the correspondence that no later plan gets to revise.
     """
-    snap = firestore_client().collection("reviews").document(review_id).get()
+    snap = tenant.collection("reviews").document(review_id).get()
     return set((snap.to_dict() or {}).get(FIELD_SENT_QUESTIONS, []))
 
 
@@ -337,7 +344,7 @@ def record_delivered(review_id: str, question_ids: list[str]) -> None:
     if not question_ids:
         return
 
-    firestore_client().collection("reviews").document(review_id).set(
+    tenant.collection("reviews").document(review_id).set(
         {FIELD_SENT_QUESTIONS: firestore.ArrayUnion(question_ids)}, merge=True
     )
 
@@ -485,8 +492,7 @@ def require_screening_record(review_id: str, source_msg: str) -> None:
     from shared.armor import COLLECTION_SCREENINGS
 
     records = (
-        firestore_client()
-        .collection(COLLECTION_SCREENINGS)
+        tenant.collection(COLLECTION_SCREENINGS)
         .where(filter=FieldFilter("review_id", "==", review_id))
         .where(filter=FieldFilter("origin_ref", "==", f"reply:{source_msg}"))
         .limit(1)
@@ -507,7 +513,7 @@ def note_reply_arrival(review: Review) -> None:
     which consumes the same event and decides. This writes a timestamp so the dashboard shows
     movement and leaves the state alone.
     """
-    firestore_client().collection("reviews").document(review.review_id).set(
+    tenant.collection("reviews").document(review.review_id).set(
         {"last_reply_at": datetime.now(UTC).isoformat()}, merge=True
     )
 

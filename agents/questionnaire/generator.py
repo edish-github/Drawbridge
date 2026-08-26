@@ -156,7 +156,11 @@ def select_questions(
 
 
 def render_questionnaire(
-    questions: list[Question], *, vendor_name: str = "", additional: bool = False
+    questions: list[Question],
+    *,
+    vendor_name: str = "",
+    additional: bool = False,
+    portal_url: str = "",
 ) -> str:
     """Render the selected questions into the outbound message body.
 
@@ -167,6 +171,10 @@ def render_questionnaire(
     ``additional`` marks the set a re-tier produced. It says so to the vendor in a sentence,
     because a second questionnaire arriving with no explanation reads as an administrative
     error and gets ignored, and the questions in it are the ones that matter most.
+
+    ``portal_url`` is the link to answer online. The questions are still listed in full beneath
+    it — a message that was only a link is a message a security team's mail filter treats as
+    phishing, and the recipient cannot see what is being asked before deciding whether to click.
     """
     opening = (
         "Your earlier answers indicate a broader data scope than this review was opened for, so"
@@ -180,6 +188,18 @@ def render_questionnaire(
         + (" (additional questions)" if additional else ""),
         "",
         opening,
+    ]
+
+    if portal_url:
+        lines += [
+            "",
+            "Answer online — your work saves as you type and you can return to it:",
+            f"  {portal_url}",
+            "",
+            "Or reply to this email. Either works, and the questions are listed below either way.",
+        ]
+
+    lines += [
         "Answers that do not name specific standards, systems, scopes or documents will come",
         "back to you as a follow-up.",
         "",

@@ -25,7 +25,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field
 
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 from shared.domain import PlanStep, ReviewPlan, Vendor
 from shared.memory import Dossier
 from shared.routing import generate
@@ -262,13 +262,12 @@ def declared_facts(review_id: str) -> set[str]:
     Declared data categories, system access level, and whether the vendor is an AI service.
     These are read from structured fields, never inferred from prose.
     """
-    db = firestore_client()
-    review = db.collection("reviews").document(review_id).get().to_dict() or {}
+    review = tenant.collection("reviews").document(review_id).get().to_dict() or {}
     vendor_id = review.get("vendor_id")
     if not vendor_id:
         return set()
 
-    raw = db.collection("vendors").document(vendor_id).get().to_dict() or {}
+    raw = tenant.collection("vendors").document(vendor_id).get().to_dict() or {}
     return facts_from_vendor(load_vendor_record(raw))
 
 
