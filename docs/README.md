@@ -10,10 +10,11 @@ current behaviour is what is written here.
 | | |
 |---|---|
 | [Getting started](getting-started.md) | The free path. No project, no billing, one command. |
-| [Architecture](architecture.md) | Five agents, one event backbone, four memory layers, and where every constraint is enforced. |
+| [Architecture](architecture.md) | Five agents on one event backbone, twenty-eight declared graph nodes, four memory layers, and where every constraint is enforced. |
 | [Security](security.md) | The screening boundary, three gateway policies, two human gates, ten identities, and what is measured versus asserted. |
 | [Live demo](live-demo.md) | The four beats, what each one proves, and how to reproduce them. |
-| [Diagrams](diagrams/README.md) | Twenty-three Mermaid sources with PNG and SVG exports. |
+| [Operator console](../services/dashboard/README.md) | Eleven screens over the ledger, and why none of them can write. |
+| [Diagrams](diagrams/README.md) | Twenty-four Mermaid sources with PNG and SVG exports, one of them generated. |
 
 ## What this is
 
@@ -33,7 +34,7 @@ The Trust Score is arithmetic in Python over model-assigned severities, not a nu
 chose. No review reaches a decision without a named person. What the models are left holding is
 the part that is genuinely judgement.
 
-## Four claims, and where each is proven
+## Five claims, and where each is proven
 
 | Claim | Proven by |
 |---|---|
@@ -41,6 +42,7 @@ the part that is genuinely judgement.
 | The score cannot be gamed by the thing being scored | An import graph: `agents/risk_scorer/scoring.py` cannot reach `shared.routing` |
 | A killed worker never sends a second email and never loses work | `make demo-crash`, three real processes and a real SIGKILL |
 | A review that ran before makes the next one shorter without making it laxer | `make demo-second`, 43 questions instead of 54, tier never falls |
+| The picture of the system is the system | `make lint` diffs the declared graph against the handler table, the event contract, the transition table and the permission matrix; `make replay REVIEW=<id>` reconstructs any review's path from the ledger |
 
 ## What is not proven yet
 

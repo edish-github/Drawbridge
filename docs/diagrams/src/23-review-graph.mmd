@@ -1,0 +1,109 @@
+---
+title: "Drawbridge — the review graph"
+---
+flowchart TB
+  subgraph intake_and_planning["Intake and planning"]
+    direction TB
+    intake(["<b>Intake</b><br/>operator"])
+    recall[/"<b>Recall dossier</b><br/>sa-orchestrator"/]
+    tier_router{{"<b>Tier router</b><br/>sa-orchestrator"}}
+    plan["<b>Plan review</b><br/>sa-orchestrator"]
+  end
+  subgraph the_questionnaire_thread["The questionnaire thread"]
+    direction TB
+    contact_gate{"<b>G2 · first outbound contact</b><br/>sa-questionnaire"}
+    questionnaire_send["<b>Generate and send</b><br/>sa-questionnaire"]
+    reply(["<b>Vendor replies</b><br/>sa-portal"])
+    reply_parse["<b>Parse reply</b><br/>sa-questionnaire"]
+    followup["<b>Re-ask an unusable answer</b><br/>sa-questionnaire"]
+    chase["<b>Chase</b><br/>sa-questionnaire"]
+    retier_router{{"<b>Re-tier router</b><br/>sa-orchestrator"}}
+    coverage_join[("<b>Coverage join</b><br/>sa-orchestrator")]
+  end
+  subgraph the_evidence_pipeline["The evidence pipeline"]
+    direction TB
+    upload(["<b>Vendor uploads evidence</b><br/>sa-portal"])
+    screening[/"<b>Screen and promote</b><br/>sa-armor"/]
+    index[/"<b>Chunk and embed</b><br/>sa-evidence"/]
+    extract["<b>Extract document facts</b><br/>sa-evidence"]
+    checks[/"<b>Deterministic checks</b><br/>sa-evidence"/]
+    cross_exam["<b>Cross-examine claims</b><br/>sa-evidence"]
+    subprocessors["<b>Diff the fourth-party chain</b><br/>sa-evidence"]
+    findings_join[("<b>Findings join</b><br/>sa-evidence")]
+  end
+  subgraph scoring_and_the_decision["Scoring and the decision"]
+    direction TB
+    score[/"<b>Trust Score</b><br/>sa-scorer"/]
+    memo["<b>Risk memo</b><br/>sa-scorer"]
+    decision_gate{"<b>G1 · risk acceptance</b><br/>sa-orchestrator"}
+    decide[/"<b>Record the decision</b><br/>sa-orchestrator"/]
+  end
+  subgraph monitoring["Monitoring"]
+    direction TB
+    monitor(("<b>Monitored portfolio</b><br/>sa-watchdog"))
+    relevance_router{{"<b>Relevance router</b><br/>sa-watchdog"}}
+    rereview(["<b>Open a linked re-review</b><br/>sa-watchdog"])
+  end
+  subgraph parked["Parked"]
+    direction TB
+    needs_human(("<b>Parked · needs a person</b><br/>any"))
+  end
+
+  intake -->|"review.intake"| recall
+  recall -.-> tier_router
+  tier_router -->|"tier 1/2/3"| plan
+  plan -->|"review.plan_ready"| contact_gate
+  contact_gate -->|"G2 released"| questionnaire_send
+  questionnaire_send -->|"review.chase_due"| chase
+  chase ==>|"rounds 1–3"| chase
+  questionnaire_send -->|"vendor.reply_received"| reply
+  reply -->|"vendor.reply_received"| reply_parse
+  reply_parse -.-> followup
+  followup ==>|"once each"| reply
+  reply_parse -.-> retier_router
+  retier_router ==>|"plan v+1"| questionnaire_send
+  retier_router --> coverage_join
+  questionnaire_send -->|"vendor.evidence_uploaded"| upload
+  upload -->|"vendor.evidence_uploaded"| screening
+  screening -->|"evidence.screened"| index
+  screening -->|"evidence.screened"| extract
+  screening -->|"adversarial conduct"| score
+  coverage_join -->|"open evidence review"| extract
+  coverage_join -->|"keep waiting"| chase
+  extract -.-> checks
+  index -.-> cross_exam
+  extract -.-> cross_exam
+  extract -.-> subprocessors
+  checks -.-> findings_join
+  cross_exam -.-> findings_join
+  subprocessors -.-> findings_join
+  findings_join -->|"review.findings_ready"| score
+  score -.-> memo
+  memo -->|"review.score_ready"| decision_gate
+  decision_gate -->|"G1 released"| decide
+  decide -.-> monitor
+  monitor -->|"watchdog.sweep"| relevance_router
+  relevance_router -->|"keep watching"| monitor
+  relevance_router -->|"triage"| needs_human
+  relevance_router --> rereview
+  rereview ==>|"new linked review"| intake
+
+  parks["<b>12 park edges not drawn</b><br/>every node above with a failure policy of <i>park</i> has an edge<br/>into Parked, carrying the reason it stalled.<br/>Draw them with --failure-edges."]
+  parks -..-> needs_human
+
+  classDef agent fill:#dbeafe,stroke:#1d4ed8,stroke-width:2px,color:#1e3a8a
+  classDef det fill:#e2e8f0,stroke:#334155,stroke-width:2px,color:#0f172a
+  classDef router fill:#ede9fe,stroke:#6d28d9,stroke-width:2px,color:#4c1d95
+  classDef join fill:#ccfbf1,stroke:#0f766e,stroke-width:2px,color:#134e4a
+  classDef gate fill:#ffedd5,stroke:#c2410c,stroke-width:2.5px,color:#7c2d12
+  classDef evt fill:#fef3c7,stroke:#b45309,stroke-width:2px,color:#78350f
+  classDef term fill:#fee2e2,stroke:#b91c1c,stroke-width:2px,color:#7f1d1d
+  class plan,questionnaire_send,reply_parse,followup,chase,extract,cross_exam,subprocessors,memo agent
+  class recall,screening,index,checks,score,decide det
+  class tier_router,retier_router,relevance_router router
+  class coverage_join,findings_join join
+  class contact_gate,decision_gate gate
+  class intake,reply,upload,rereview evt
+  class monitor,needs_human term
+  classDef legend fill:#ffffff,stroke:#94a3b8,stroke-width:1px,color:#475569
+  class parks legend

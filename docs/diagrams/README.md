@@ -1,6 +1,6 @@
 # Diagrams
 
-Twenty-three Mermaid sources with PNG and SVG exports. Every diagram here describes something
+Twenty-four Mermaid sources with PNG and SVG exports. Every diagram here describes something
 that exists. Where a node described a component that was planned and not built, the node was
 **deleted** rather than greyed out — a diagram that hedges is a diagram nobody can check.
 
@@ -57,12 +57,34 @@ fine; inside sequence notes they are not.
 | 20 | Failure semantics | Architecture, Security |
 | 21 | Tests, claims and demo beats | Live demo |
 | 22 | Demo shot map | working document |
+| 23 | The review graph | Architecture — **generated** |
 | 24 | The fourth-party chain | Architecture, Security |
 
-**23 is deliberately absent.** It was specified as a generated dump of an ADK graph workflow, and
-the Orchestrator is not an ADK graph — it is an event-driven consumer on Pub/Sub. There is no
-`scripts/graph_dump.py` and nothing to dump. A placeholder for a picture the repository cannot
-produce is the kind of thing this set exists to not have.
+**23 is generated, and it is the only one in this set that is.** It was absent for most of the
+build, and the reason given was right at the time: it had been specified as a dump of an ADK
+graph workflow, the Orchestrator is not one, there was no `scripts/graph_dump.py`, and a
+placeholder for a picture the repository cannot produce is the kind of thing this set exists to
+not have.
+
+What changed is not the execution model. There is still no graph runner and no process holds a
+review's position. What changed is that the topology is declared as data in `shared/graph.py`, so
+there is something to dump — and because it is generated from the same object
+`scripts/check_contracts.py --check graph` diffs against the subscriber table, the event
+contract, the transition table and the permission matrix, this is the one diagram here that
+cannot quietly stop being true.
+
+```bash
+make graph        # rewrites src/23-review-graph.mmd, then render it with the loop above
+make replay REVIEW=<id>   # the same graph, coloured by what one review actually did
+```
+
+**Twelve park edges are summarised rather than drawn**, and that is a cartographic decision
+rather than a tidying one. Every node with a failure policy of `park` has an edge into
+*Parked · needs a person*; drawing them puts a dozen identical lines across every band and spends
+the reader's attention on the one property that is uniform. The note on the diagram states the
+property instead, where it is easier to check than a dozen arrows are — a claim that every node
+parks is falsified by one node that cannot. `--failure-edges` draws them for the times the
+question is specifically about the failure topology.
 
 ## What changed in this pass
 
@@ -83,6 +105,9 @@ Corrected against the code rather than against the plan:
 | 14 | $0.50 per-review ceiling | $1.00, measured |
 | 17 | never rendered — a semicolon in a sequence note | renders |
 | 24 | generic placeholders, marked *(Target)*, no chain data | the real DataDynamo chain, the four finding types and their gates, and the beat |
+
+| 23 | absent — "there is no graph to dump" | generated from `shared/graph.py` by `make graph` |
+| 01, 02 | agents as five boxes | unchanged; the node-level view is 23, and the two are different questions |
 
 The sources these were derived from live outside this repository and are unchanged; this
 directory is the copy that tracks the code.

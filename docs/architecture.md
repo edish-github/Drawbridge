@@ -1,6 +1,6 @@
 # Architecture
 
-The system as it is. Sixteen amendments were recorded during the build where the implementation
+The system as it is. Eighteen amendments were recorded during the build where the implementation
 disagreed with the plan; every one that changed the design is folded into the text below rather
 than listed as a correction, and [`CHANGELOG-amendments.md`](../CHANGELOG-amendments.md) keeps
 the record of what moved and why.
@@ -9,26 +9,35 @@ the record of what moved and why.
 
 ## Five agents, one backbone
 
-| Agent | Identity | What it decides |
-|---|---|---|
-| Orchestrator | `sa-orchestrator` | Tier, plan, re-tier, dispatch, gates |
-| Questionnaire | `sa-questionnaire` | Generate, send, parse, chase, re-ask |
-| Evidence | `sa-evidence` | Extract, index, retrieve, cross-examine, diff the fourth-party chain |
-| Risk Scorer | `sa-scorer` | Rubric arithmetic and the memo |
-| Watchdog | `sa-watchdog` | Post-approval sweeps and linked re-reviews |
+| Agent | Identity | What it decides | Graph nodes |
+|---|---|---|---|
+| Orchestrator | `sa-orchestrator` | Tier, plan, re-tier, dispatch, gates | 7 |
+| Questionnaire | `sa-questionnaire` | Generate, send, parse, chase, re-ask | 5 |
+| Evidence | `sa-evidence` | Extract, index, retrieve, cross-examine, diff the fourth-party chain | 6 |
+| Risk Scorer | `sa-scorer` | Rubric arithmetic and the memo | 2 |
+| Watchdog | `sa-watchdog` | Post-approval sweeps and linked re-reviews | 3 |
 
-**ADK 2 builds the agents; Pub/Sub orchestrates them.** The planning documents describe a graph
-workflow, and that is not what this is. Each agent is an ADK `LlmAgent` with its own instruction,
-tools and output schema — that part is as designed — but nothing composes them into a graph.
-They never call each other and no process holds the fleet's position in a review.
+The last column is the point of [the graph](#the-graph): five services, twenty-three nodes
+between them, and the Orchestrator alone is a router, a planner, a barrier and two halves of a
+gate.
+
+**ADK 2 builds the agents; Pub/Sub orchestrates them; the graph describes them and nothing
+executes it.** Each agent is an ADK `LlmAgent` with its own instruction, tools and output schema,
+and nothing composes them into a runnable graph. They never call each other and no process holds
+the fleet's position in a review.
 
 The reason is the one the whole design rests on: **any agent can crash without stalling the
 fleet.** A graph runner is a place for the review to live, and a place for the review to live is
 a process whose death loses it. Here the review's position is a checkpointed row in Firestore
 and the next step is an unacknowledged message, so a worker killed mid-send is replaced by
 another worker that reads the same two things and carries on. `make demo-crash` is that sentence
-executed rather than asserted. It is also why there is no `scripts/graph_dump.py` and no diagram
-23: there is no graph to dump, and a picture the repository cannot produce is not one to fake.
+executed rather than asserted.
+
+That argument is about **execution**, and for a long time it was also used to avoid writing the
+topology down at all. Those are different things, and conflating them cost something real: the
+graph still existed — in the shape of five `handle_event` functions, an `EXPECTED_STATES` table
+and a transition table — and the three could disagree without anything failing. See
+[The graph](#the-graph).
 
 Every arrow between agents is one of twelve Pub/Sub topics, delivered at-least-once and
 unordered, with a dead-letter path to `NEEDS_HUMAN` after five attempts. A consumer checks review
@@ -36,6 +45,123 @@ state before acting, so a reply arriving after `SCORED` attaches as an addendum 
 score rather than being dropped or applied out of order.
 
 ![The fleet on one page](diagrams/svg/02-fleet-overview.svg)
+
+## The graph
+
+![The review graph](diagrams/svg/23-review-graph.svg)
+
+Twenty-eight nodes, five bands, three routers, two joins and four cycles, declared in
+`shared/graph.py` and **generated** into the diagram above by `scripts/graph_dump.py`. Diagram 23
+was absent from this set for most of the build, and the reason given was correct at the time: it
+had been specified as a dump of an ADK graph workflow, the Orchestrator is not one, and a
+placeholder for a picture the repository cannot produce is worse than a gap. What changed is not
+the execution model — there is still no graph runner — but that the topology is now data, so
+there is something to dump.
+
+**The graph describes; it never drives.** Nothing in `shared/graph.py` dispatches, schedules or
+holds a position. Dispatch is still `shared.subscriber.handlers()`, the review's position is
+still a checkpointed row and an unacked message, and `make demo-crash` still works for the same
+reason it always did.
+
+What the declaration buys is that it can be **checked**. `make lint` runs
+`scripts/check_contracts.py --check graph`, which diffs it against the four places the topology
+actually lives:
+
+| It checks | Against |
+|---|---|
+| every topic a node consumes or emits | `ALL_TOPICS`, and `shared.subscriber.handlers()` |
+| the states a node runs in | `EXPECTED_STATES` |
+| the state a node advances a review to | the transition table in `shared.domain` |
+| a node's reads, writes and denials | `infra/iam/permission-matrix.yaml` |
+
+The last row is the one that earns the module. **It found a real bug on its first run:** the
+Watchdog writes the `reviews` collection when it opens a linked re-review, and no row in the
+permission matrix granted it — so the generated Firestore rules denied the write, and the
+re-review would have failed the first time real IAM was applied while passing every local test
+until then. The grant is now in the matrix, scoped and commented, and
+`tests/test_iam_boundaries.py` asserts it against the emulator.
+
+### Nodes are not states, and not steps
+
+Three vocabularies that were previously one:
+
+- a **state** is where a review is — nine of them, one per review
+- a **node** is a unit of work — twenty-eight of them, several per state
+- a **step** is a durable checkpoint — a node may have one, or none
+
+Cross-examination and subprocessor extraction are two nodes inside one state under one
+checkpoint. The Orchestrator is one service and one identity, and it is also a router, a planner,
+a barrier and two halves of a gate; a diagram that drew it as a single box would be drawing the
+deployment rather than the work.
+
+Seven node kinds, and the distinction that matters most is **agent** against **deterministic**:
+an agent node reaches a model and its output is judgement, a deterministic node is arithmetic and
+its output is reproducible. Scoring and the memo deploy as one service and are two different
+kinds, which is exactly why the distinction is on the node rather than on the service.
+
+### Routers, joins and cycles
+
+**Three routers**, each with a direction it may not travel. The tier router may raise scrutiny
+and never lower it; the re-tier router may only tighten; a signal is never un-seen. Each of those
+is a security property rather than a workflow convenience — a router that could travel the other
+way would let a vendor's own answers reduce the scrutiny applied to them — so the constraint is
+declared on the router and asserted.
+
+**Two joins**, evaluated by `shared/join.py` against the policy the graph declares. The coverage
+join is a threshold at 90% with a named override — an analyst marking the reply thread complete,
+which is what happens in the ordinary case of a vendor who answers most of what was asked and
+stops. The findings join requires all three arms and parks on a shortfall, because a partial
+finding set scored as if complete is the failure this design exists to prevent.
+
+A join returns a **verdict rather than a boolean**. The caller needs to know whether to proceed;
+the operator needs to know which arm is short and whether an override exists, and a boolean throws
+both away. An arm whose evidence cannot be read is reported `unknown` rather than absent, and an
+unknown required arm never satisfies a join — a barrier that opens because its input was
+unreadable is worse than one that waits.
+
+**Four cycles, and only one of them needed a budget.** Three terminate by arithmetic: three chase
+rounds, one re-ask per answer, and three tiers with a tier that only ever rises. Re-review has no
+such bound — every reopening is a legitimate new review by every rule the system has, so a vendor
+in a noisy news cycle could be reopened indefinitely, each time costing a questionnaire they have
+already answered. The budget is three, counted along the `reopened_from` chain, and what happens
+when it is spent is deliberately **not** "stop monitoring": the signal still goes up as a triage
+card, and a person decides whether a fourth automated re-review is the right answer.
+
+### Failure edges are executed, not described
+
+Every node declares what happens when it fails: `park`, `degrade` or `skip`, which is the
+[failure-semantics rule](#failure-semantics) written per node. The failure edges in the diagram
+are **derived** from those policies rather than drawn beside them, so a node whose policy changes
+loses its edge in the same commit.
+
+One of them was previously described and not executed. `infra/pubsub.yaml` said a message
+reaching its dead-letter topic moves its review to `NEEDS_HUMAN` and surfaces on the dashboard;
+`tests/test_late_events.py` asserted it behind a skip; and nothing did it. Pub/Sub moved the
+message off the subscription after five deliveries and the *review* sat in whatever state it had,
+in flight forever, with no card. `shared/subscriber.py` now reads `delivery_attempt` and parks on
+the last delivery — before the dead-letter, because a consumer that has already lost the message
+cannot act on it.
+
+### Replay
+
+`make replay REVIEW=<id>` reconstructs any review's path through the graph, and the dashboard
+renders the same projection at `/review/<id>/graph` with every node expandable to its contract.
+
+The projection reads the review document, the event ledger, the reasoning records, the cards and
+the findings — **no new collection and no new IAM row**, all of it what the audit binder already
+reads. That constraint was chosen before the code was written and it shaped the design: a
+projection with its own write path would be a second source of truth about what happened, and the
+first thing a second source of truth does is disagree with the first one.
+
+It also means the projection is retroactive. A review that ran before this module existed
+projects exactly as well as one that ran after it, because nothing was instrumented for it. One
+optional field was added to an existing write path — `record_decision(..., node=)` — which makes
+the answer exact where a node has no checkpoint, publishes no event and writes no collection of
+its own; without it, dossier recall on a repeat review would show as never having run.
+
+A node whose evidence cannot be read reports `unknown`, never `pending`. The two look identical
+on a diagram and mean opposite things, and a projection that collapsed them would be least
+reliable at exactly the moment somebody was using it to diagnose a failure.
 
 ## Who may move a review
 
@@ -234,6 +360,32 @@ Eight sections, HTML with a print stylesheet, rendered in about fifty millisecon
 by a template, never by a model**, and the cover says so — asserted by an import graph, because
 a document that could be steered by the content it reports on is worse than no document.
 
+## The operator console
+
+Eleven screens over the ledger, built to the design canvas in `Drawbridge.html`. Server
+components reading Firestore directly; one client component, and only because the sidebar needs
+the URL.
+
+**No write path anywhere in it.** No API route, no mutation, no signing key — asserted against
+the source tree by `tests/test_console.py` rather than left as a convention. The console is where
+an operator decides, and it holds nothing that can act on the decision, which is the same
+argument `shared/gateway.py` makes by refusing to sign.
+
+Two things reach the screen through generated JSON rather than being declared twice, because the
+console is TypeScript and the fleet is Python: the review graph (`scripts/graph_dump.py`) and the
+policy — rubric, permission matrix, the three gateway policies (`scripts/policy_dump.py`).
+`make console` rewrites both and a test regenerates and diffs, so a stale copy fails CI rather
+than showing last week's rubric.
+
+Three screens are arguments rather than views. **Agent Registry** is derived from the node
+contracts, so it cannot print a permission the matrix does not grant. **Evidence** makes the same
+four-way screening distinction `shared.armor` makes — including *not a verdict* for a stub or a
+seeded fixture — rather than a softer one. **Settings** shows the policy and cannot change it,
+because policy lives in version control and a change to the rubric is a diff somebody reviewed.
+
+The console and the audit binder share one palette; the diagrams keep the older slate one. Those
+are documentation *about* the system rather than output *from* it.
+
 ## Data model
 
 ![Firestore data model](diagrams/svg/13-data-model-er.svg)
@@ -250,3 +402,8 @@ and never the other way round.** Model Armor unavailable promotes nothing and pa
 A skipped detector is not a detector that found nothing. A retrieval index that is unavailable
 falls back to whole-document reconciliation with the prompt saying so. A feed outage logs and
 skips, and the Watchdog never blocks or degrades an active review.
+
+Every node in [the graph](#the-graph) declares which of the three it does, and the diagram's
+failure edges are derived from those declarations rather than drawn next to them. Dead-letter
+exhaustion is now one of them rather than a sentence in `infra/pubsub.yaml` that nothing
+executed.
