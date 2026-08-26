@@ -62,6 +62,7 @@ from shared.events import (
     load_review,
     publish,
 )
+from shared.join import evaluate
 from shared.memory import recall_dossier
 from shared.state import advance, park
 from shared.telemetry import record_decision, span
@@ -74,6 +75,27 @@ STEP_PLAN = "plan"
 """The checkpoint name the plan is recorded under. Read by the Questionnaire agent, so it is a
 constant rather than a string literal in two files.
 """
+
+NODE_RECALL = "recall"
+NODE_TIER_ROUTER = "tier_router"
+NODE_PLAN = "plan"
+NODE_RETIER_ROUTER = "retier_router"
+NODE_COVERAGE_JOIN = "coverage_join"
+NODE_CONTACT_GATE = "contact_gate"
+NODE_DECISION_GATE = "decision_gate"
+NODE_DECIDE = "decide"
+"""The graph nodes this agent is responsible for, as ids from ``shared.graph``.
+
+Seven of them in one agent, which is the point of separating nodes from agents. The Orchestrator
+is one service and one identity; it is also a router, a planner, a barrier and two halves of a
+gate, and a diagram that drew it as a single box would be drawing the deployment rather than the
+work. ``scripts/check_contracts.py --check graph`` asserts every id here is declared.
+"""
+
+JOIN_COVERAGE = "coverage"
+"""The barrier that decides whether the review has enough answers to reconcile. Declared in
+``shared.graph.JOINS`` and evaluated by ``shared.join``; the threshold lives there rather than
+here, so the number a diagram prints and the number the code compares against are one value."""
 
 TOOLS: list = []
 """Registered through ``shared.gateway``. Empty until the tools exist; an agent with no
@@ -182,6 +204,21 @@ def on_intake(event: EventEnvelope, review: Review) -> None:
 
         plan = Plan.model_validate(recorded)
 
+        # The router's outcome recorded separately from the plan's, because they are separate
+        # questions with separate answers. "Which tier" is a branch a monotonic rule decided;
+        # "which steps" is what the plan holds. Collapsing them into one record would make the
+        # graph's only intake branch invisible in the projection that is supposed to show it.
+        record_decision(
+            s,
+            node=NODE_TIER_ROUTER,
+            goal="route the review to a tier",
+            decision=(
+                f"tier {plan.tier} — {plan.reason} · scrutiny never falls, so the deterministic "
+                "floor over the declared intake fields is a ceiling on the tier number"
+            ),
+            ctx=ctx,
+        )
+
         advance(
             review,
             ReviewState.QUESTIONNAIRE_OUT,
@@ -192,6 +229,7 @@ def on_intake(event: EventEnvelope, review: Review) -> None:
 
         record_decision(
             s,
+            node=NODE_PLAN,
             goal=f"tier and plan the review of {vendor.name}",
             decision=(
                 f"Tier {plan.tier}: {plan.reason}"
@@ -243,7 +281,6 @@ def on_reply_received(event: EventEnvelope, review: Review) -> None:
     superseded.
     """
     from agents.orchestrator.retier import reassess_tier
-    from agents.questionnaire.parser import COVERAGE_TO_PROCEED, coverage
 
     ctx = context_for(event, agent="orchestrator")
 
@@ -258,14 +295,14 @@ def on_reply_received(event: EventEnvelope, review: Review) -> None:
             return
         review = retiered
 
-        reached = coverage(review.review_id)
-        forced = replies_marked_complete(review.review_id)
+        verdict = evaluate(JOIN_COVERAGE, review.review_id)
 
-        if reached < COVERAGE_TO_PROCEED and not forced:
+        if not verdict.satisfied:
             record_decision(
                 s,
+                node=NODE_COVERAGE_JOIN,
                 goal="decide whether the review has enough answers to reconcile",
-                decision=f"coverage {reached:.0%}, below {COVERAGE_TO_PROCEED:.0%}; still waiting",
+                decision=verdict.summary(),
                 ctx=ctx,
             )
             return
@@ -273,23 +310,19 @@ def on_reply_received(event: EventEnvelope, review: Review) -> None:
         advance(
             review,
             ReviewState.EVIDENCE_REVIEW,
-            reason=(
-                f"coverage {reached:.0%}"
-                if not forced
-                else f"analyst proceeded at {reached:.0%} coverage"
-            ),
+            reason=verdict.reason,
         )
         record_decision(
             s,
+            node=NODE_COVERAGE_JOIN,
             goal="decide whether the review has enough answers to reconcile",
-            decision=f"opened evidence review at {reached:.0%} coverage",
+            decision=f"opened evidence review — {verdict.reason}",
             ctx=ctx,
         )
         log.info(
-            "review=%s opened evidence review at %.0f%% coverage%s",
+            "review=%s opened evidence review: %s",
             review.review_id,
-            reached * 100,
-            " (analyst proceeded)" if forced else "",
+            verdict.reason,
         )
 
 
@@ -329,6 +362,7 @@ def resume_questionnaire(retiered: Review, previous: Review, ctx, s) -> None:
     )
     record_decision(
         s,
+        node=NODE_RETIER_ROUTER,
         goal="decide whether the evidence so far matches the tier the intake form declared",
         decision=(
             f"it does not — re-tiered {previous.tier} to {retiered.tier} and re-planned; "
@@ -336,17 +370,6 @@ def resume_questionnaire(retiered: Review, previous: Review, ctx, s) -> None:
         ),
         ctx=ctx,
     )
-
-
-def replies_marked_complete(review_id: str) -> bool:
-    """Return whether an analyst has declared the reply thread finished.
-
-    The escape hatch for the ordinary case where a vendor answers most of what was asked and
-    stops. Without it a review waits on a threshold no real correspondence reaches, which looks
-    like the fleet hanging rather than like the fleet waiting.
-    """
-    snap = firestore_client().collection("reviews").document(review_id).get()
-    return bool((snap.to_dict() or {}).get("replies_complete", False))
 
 
 def on_score_ready(event: EventEnvelope, review: Review) -> None:
@@ -385,6 +408,7 @@ def on_score_ready(event: EventEnvelope, review: Review) -> None:
         )
         record_decision(
             s,
+            node=NODE_DECISION_GATE,
             goal="decide whether the review can close",
             decision=f"scored {score} ({band}); parked for a named human to accept the risk",
             ctx=ctx,
@@ -419,6 +443,7 @@ def note_prior_review(review: Review, dossier, ctx, span_handle):
     )
     record_decision(
         span_handle,
+        node=NODE_RECALL,
         goal=f"recall what is already known about {review.vendor_id}",
         decision=prior.summary(),
         ctx=ctx,
@@ -484,6 +509,7 @@ def on_approved(event: EventEnvelope, review: Review) -> None:
 
         record_decision(
             s,
+            node=NODE_DECIDE if scope == "decision" else NODE_CONTACT_GATE,
             goal=f"release the {scope} gate",
             decision=f"released by {identity}",
             ctx=ctx,

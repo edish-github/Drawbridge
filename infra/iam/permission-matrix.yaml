@@ -102,8 +102,15 @@ identities:
     display: Drawbridge watchdog
     purpose: Post-approval monitoring. Fetches only from the feed allowlist.
     firestore:
+      # reviews write covers exactly one operation: creating the NEW linked review a signal
+      # opens. It is not permission to edit a decided one — a decided review is immutable by the
+      # transition table, and only the Orchestrator may advance any review, asserted against the
+      # source tree by tests/test_state_ownership.py. The grant was missing until the graph
+      # contract check compared agents/watchdog/agent.py against this file and found the
+      # watchdog writing a collection the generated rules denied it; the re-review would have
+      # failed the first time real IAM was applied, and passed every local test until then.
       read: [reviews, vendors, scores, tasks, approved_vendors, idempotency, dashboard_events]
-      write: [tasks, idempotency, dashboard_events, events, decisions]
+      write: [reviews, tasks, idempotency, dashboard_events, events, decisions]
     pubsub: [publish]
     vertex_ai: true
     storage: []
@@ -112,6 +119,7 @@ identities:
       - approvals
       - email
       - vendor data write
+      - mutating a decided review
 
   - name: sa-armor
     display: Drawbridge screening pipeline

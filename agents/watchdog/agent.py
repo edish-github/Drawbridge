@@ -166,7 +166,13 @@ def triage(ctx: AgentContext, signals: list[Signal]) -> tuple[list[str], int, in
         record_signal(signal, vendor.vendor_id, action)
 
         if action is Action.OPEN_REREVIEW:
-            opened.append(open_rereview(ctx, vendor, signal))
+            # ``None`` means the cycle budget was spent and a triage card went up instead. The
+            # signal is still actioned and still recorded; what changed is who decides next.
+            new_review = open_rereview(ctx, vendor, signal)
+            if new_review is None:
+                triaged += 1
+            else:
+                opened.append(new_review)
         elif action is Action.TRIAGE:
             triaged += 1
             raise_triage_card(vendor, signal)
@@ -202,15 +208,41 @@ def resolve_vendor(signal: Signal) -> Vendor | None:
     return None
 
 
-def open_rereview(ctx: AgentContext, vendor: Vendor, signal: Signal) -> str:
-    """Open a **new** review linked to the closed one. Returns the new review id.
+def open_rereview(ctx: AgentContext, vendor: Vendor, signal: Signal) -> str | None:
+    """Open a **new** review linked to the closed one. Returns the new review id, or ``None``
+    when the cycle budget is spent and a person has been asked instead.
 
     Never a mutation of the decided review. A decided review is the record of a decision a named
     person made on a named date against a named set of evidence, and editing it six months later
     would make the binder a document about the present rather than about that decision. The link
     runs the other way: the new review carries ``reopened_from``.
+
+    **The cycle is bounded, and this is the one cycle in the graph with no natural bound.** The
+    chase loop stops after three rounds because a counter says so; the re-tier loop stops because
+    there are three tiers and the tier only ever rises. Re-review has neither: every reopening is
+    a legitimate new review by every rule the system has, so a vendor in a noisy news cycle can
+    be reopened indefinitely, each one costing a questionnaire the vendor has answered twice
+    already. ``shared.graph.CYCLES`` declares the budget; ``chain_depth`` counts against it.
+
+    What happens at the budget is deliberately not "stop monitoring". A vendor nobody is watching
+    is the outcome this component exists to prevent, so the signal is still recorded and still
+    raised — it goes to a person as a triage card, and the decision about whether a fourth
+    automated re-review is the right answer is theirs.
     """
     previous = latest_review_id(vendor.vendor_id)
+
+    budget = rereview_budget()
+    depth = chain_depth(previous)
+    if depth >= budget.max_iterations:
+        log.warning(
+            "review chain for %s is %d deep against a budget of %d; raising triage rather than "
+            "opening another automated re-review",
+            vendor.vendor_id,
+            depth,
+            budget.max_iterations,
+        )
+        raise_triage_card(vendor, signal, reason=f"re-review budget spent at depth {depth}")
+        return None
     review = Review(
         review_id=f"rereview-{vendor.vendor_id}-{uuid.uuid4().hex[:6]}",
         vendor_id=vendor.vendor_id,
@@ -243,8 +275,16 @@ def open_rereview(ctx: AgentContext, vendor: Vendor, signal: Signal) -> str:
     return review.review_id
 
 
-def raise_triage_card(vendor: Vendor, signal: Signal) -> None:
-    """Put a signal the fleet is unsure about in front of a person, and open nothing."""
+def raise_triage_card(
+    vendor: Vendor, signal: Signal, *, reason: str = "below the confidence threshold"
+) -> None:
+    """Put a signal the fleet is unsure about in front of a person, and open nothing.
+
+    Two callers now, and the card says which. A signal under the confidence threshold and a
+    signal over it that arrived past the cycle budget both end here, and they mean different
+    things to whoever picks the card up: the first is "we are not sure this is your vendor", the
+    second is "we are sure, and this is the fourth time".
+    """
     firestore_client().collection("dashboard_events").add(
         {
             "review_id": latest_review_id(vendor.vendor_id) or "",
@@ -253,10 +293,56 @@ def raise_triage_card(vendor: Vendor, signal: Signal) -> None:
             "title": signal.title,
             "source": signal.source,
             "url": signal.url,
+            "reason": reason,
             "at": datetime.now(UTC).isoformat(),
         }
     )
-    log.info("signal %s sent to triage for %s", signal.signal_id, vendor.vendor_id)
+    log.info("signal %s sent to triage for %s: %s", signal.signal_id, vendor.vendor_id, reason)
+
+
+def rereview_budget():
+    """The declared re-review cycle, read from the graph rather than restated here.
+
+    Raises:
+        KeyError: when the graph declares no ``rereview`` cycle. A budget with no declaration is
+            a number in a handler, which is what this indirection exists to stop.
+    """
+    from shared.graph import GRAPH
+
+    for cycle in GRAPH.cycles:
+        if cycle.id == "rereview":
+            return cycle
+    raise KeyError("shared.graph declares no 'rereview' cycle to budget against")
+
+
+def chain_depth(review_id: str | None) -> int:
+    """How many automated re-reviews already stand behind ``review_id``.
+
+    Walks ``reopened_from`` backwards. Bounded by the budget plus a small margin rather than by
+    the length of the chain, because a corrupt link that pointed at itself would otherwise make
+    the counter the thing that hangs the sweep.
+    """
+    if not review_id:
+        return 0
+
+    db = firestore_client()
+    depth = 0
+    seen: set[str] = set()
+    current: str | None = review_id
+
+    while current and depth < 64:
+        seen.add(current)
+        doc = db.collection("reviews").document(current).get().to_dict() or {}
+        parent = doc.get("reopened_from")
+        # A link already walked is a corrupt chain rather than a longer one. Counting it would
+        # let a review pointing at itself read as one re-review deep, which is a budget spent on
+        # a bad write rather than on work the fleet did.
+        if not parent or str(parent) in seen:
+            break
+        depth += 1
+        current = str(parent)
+
+    return depth
 
 
 def already_seen(signal_id: str) -> bool:

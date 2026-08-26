@@ -135,9 +135,9 @@ service cloud.firestore {
 
     match /reviews/{doc} {
       // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog, sa-armor, sa-portal, sa-dashboard, sa-approvals, sa-binder
-      // write: sa-orchestrator, sa-questionnaire
+      // write: sa-orchestrator, sa-questionnaire, sa-watchdog
       allow read: if caller() in ['sa-approvals@drawbridge-hack.iam.gserviceaccount.com', 'sa-armor@drawbridge-hack.iam.gserviceaccount.com', 'sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-portal@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
+      allow write: if caller() in ['sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
     }
 
     match /scores/{doc} {

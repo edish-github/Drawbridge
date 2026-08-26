@@ -49,14 +49,24 @@ SECTIONS = (
     ("8", "Post-approval monitoring"),
 )
 
-# The palette is the architecture diagrams' palette. One colour language across the diagrams,
-# the dashboard and this document means a reader who studied diagram 01 already knows what a red
-# rule means here.
+# The palette is the product's palette, shared with the operator console.
+#
+# It used to be the architecture diagrams' — slate and blue — and the argument was that one
+# colour language across the diagrams, the console and this document means a reader who studied
+# diagram 01 already knows what a red rule means here. The console has since been built to its
+# own design, and the choice was which pair to keep in step.
+#
+# The console and the binder, because they are the two artefacts a *customer* sees: the screen an
+# analyst decides on and the document an auditor receives. The diagrams keep the slate palette
+# and are documentation about the system rather than output from it. A red rule still means the
+# same thing in all three; only the hue moved, and it moved together where it matters.
+#
+# tests/test_console.py asserts these values against the console's tokens.
 STYLE = """
 :root {
-  --ink: #0f172a; --mute: #64748b; --faint: #94a3b8; --line: #e2e8f0; --shell: #f8fafc;
-  --accent: #1d4ed8; --danger: #b91c1c; --warn: #b45309; --ok: #15803d; --human: #c2410c;
-  --violet: #6d28d9;
+  --ink: #191a1c; --mute: #6f6c66; --faint: #96938c; --line: #dcd8d0; --shell: #f6f4f0;
+  --accent: #4a6ca4; --danger: #bb4a3a; --warn: #a9722a; --ok: #3d8a67; --human: #a9722a;
+  --violet: #6a57a3;
 }
 * { box-sizing: border-box; }
 body {
