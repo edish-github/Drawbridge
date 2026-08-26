@@ -16,7 +16,7 @@ import pytest
 
 from scenarios.demo_runner import BeatMissing, beats_for, run
 from scenarios.fixtures import responding_from
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 from shared.domain import Review
 from tests.conftest import emulator_required, pubsub_required
 
@@ -158,7 +158,7 @@ def test_every_finding_reaches_the_score(datadynamo_run):
 def test_the_score_has_a_per_domain_breakdown(datadynamo_run):
     """Binder section 5, and the answer to "why 55?"."""
     review = _latest_review()
-    score = firestore_client().collection("scores").document(review["review_id"]).get().to_dict()
+    score = tenant.collection("scores").document(review["review_id"]).get().to_dict()
 
     assert score["breakdown"]
     assert sum(score["breakdown"].values()) == pytest.approx(score["score"], abs=1)
@@ -207,7 +207,7 @@ def _latest_review() -> dict:
 
     reviews = [
         d.to_dict()
-        for d in firestore_client()
+        for d in tenant
         .collection("reviews")
         .where(filter=FieldFilter("vendor_id", "==", "datadynamo"))
         .stream()
@@ -229,7 +229,7 @@ def _scoped(collection: str, review_id: str) -> list[dict]:
 
     return [
         d.to_dict()
-        for d in firestore_client()
+        for d in tenant
         .collection(collection)
         .where(filter=FieldFilter("review_id", "==", review_id))
         .stream()
@@ -246,7 +246,7 @@ def _inbox(review_id: str, kind: str | None = None) -> list[dict]:
     from google.cloud.firestore_v1 import FieldFilter
 
     query = (
-        firestore_client()
+        tenant
         .collection("inbox")
         .where(filter=FieldFilter("review_id", "==", review_id))
     )
@@ -273,7 +273,7 @@ def _count(collection: str, review_id: str) -> int:
 
     return len(
         list(
-            firestore_client()
+            tenant
             .collection(collection)
             .where(filter=FieldFilter("review_id", "==", review_id))
             .stream()

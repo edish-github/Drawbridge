@@ -21,6 +21,7 @@ from agents.evidence.extractors import (
     MAX_DOCUMENT_CHARS,
     retrieve_facts,
 )
+from shared import tenancy
 from shared.armor import _short
 from shared.context import AgentContext
 from shared.domain import EvidenceChunk
@@ -28,7 +29,12 @@ from tests.conftest import emulator_required
 
 
 def ctx(review_id: str) -> AgentContext:
-    return AgentContext(review_id=review_id, agent="evidence", trace_id="t")
+    return AgentContext(
+        org_id=tenancy.current_org(),
+        review_id=review_id,
+        agent="evidence",
+        trace_id="t",
+    )
 
 
 def chunk(review_id: str, doc_ref: str, index: int, text: str) -> EvidenceChunk:

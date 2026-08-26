@@ -24,6 +24,7 @@ from agents.orchestrator.retier import (
     record_tier_change,
     replan,
 )
+from shared import tenancy
 from shared.checkpoint import step_result
 from shared.context import AgentContext
 from shared.domain import Review, ReviewState, TierChange
@@ -54,7 +55,12 @@ PLAN_V1 = {
 
 
 def ctx(review_id: str) -> AgentContext:
-    return AgentContext(review_id=review_id, agent="orchestrator", trace_id="t")
+    return AgentContext(
+        org_id=tenancy.current_org(),
+        review_id=review_id,
+        agent="orchestrator",
+        trace_id="t",
+    )
 
 
 @pytest.fixture

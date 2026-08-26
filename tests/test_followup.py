@@ -30,6 +30,7 @@ from agents.questionnaire.followup import (
     outstanding,
 )
 from agents.questionnaire.parser import ParsedAnswer
+from shared import tenancy
 from shared.context import AgentContext
 from shared.domain import Review, ReviewState
 from shared.events import load_review
@@ -75,7 +76,12 @@ STRONG = ParsedAnswer(
 
 
 def ctx(review_id: str) -> AgentContext:
-    return AgentContext(review_id=review_id, agent="questionnaire", trace_id="t")
+    return AgentContext(
+        org_id=tenancy.current_org(),
+        review_id=review_id,
+        agent="questionnaire",
+        trace_id="t",
+    )
 
 
 @pytest.fixture

@@ -16,6 +16,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from agents.watchdog.agent import chain_depth, open_rereview, rereview_budget
+from shared import tenancy
 from shared.context import AgentContext
 from shared.domain import Vendor
 from tests.conftest import emulator_required
@@ -137,7 +138,12 @@ def reviews_for(db, vendor_id: str) -> int:
 def test_a_re_review_inside_the_budget_opens_a_new_linked_review(db, review_id):
     vendor_id = f"v{review_id}"
     newest = chain(db, vendor_id, depth=0)
-    ctx = AgentContext(review_id=newest, agent="watchdog", trace_id="t")
+    ctx = AgentContext(
+        org_id=tenancy.current_org(),
+        review_id=newest,
+        agent="watchdog",
+        trace_id="t",
+    )
 
     opened = open_rereview(ctx, vendor(vendor_id), signal(vendor_id))
 
@@ -151,7 +157,12 @@ def test_a_re_review_inside_the_budget_opens_a_new_linked_review(db, review_id):
 def test_a_re_review_past_the_budget_opens_nothing(db, review_id):
     vendor_id = f"v{review_id}"
     newest = chain(db, vendor_id, depth=rereview_budget().max_iterations)
-    ctx = AgentContext(review_id=newest, agent="watchdog", trace_id="t")
+    ctx = AgentContext(
+        org_id=tenancy.current_org(),
+        review_id=newest,
+        agent="watchdog",
+        trace_id="t",
+    )
 
     before = reviews_for(db, vendor_id)
     opened = open_rereview(ctx, vendor(vendor_id), signal(vendor_id))
@@ -170,7 +181,12 @@ def test_a_spent_budget_raises_a_card_rather_than_going_quiet(db, review_id):
     """
     vendor_id = f"v{review_id}"
     newest = chain(db, vendor_id, depth=rereview_budget().max_iterations)
-    ctx = AgentContext(review_id=newest, agent="watchdog", trace_id="t")
+    ctx = AgentContext(
+        org_id=tenancy.current_org(),
+        review_id=newest,
+        agent="watchdog",
+        trace_id="t",
+    )
 
     open_rereview(ctx, vendor(vendor_id), signal(vendor_id))
 

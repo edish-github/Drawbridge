@@ -17,7 +17,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from shared.clients import firestore_client
+from shared import tenancy
+from shared import tenancy as tenant
 from shared.context import AgentContext
 from shared.domain import Review, ReviewPlan, ReviewState
 from shared.events import EventEnvelope, load_review
@@ -67,8 +68,7 @@ def stub_planning(monkeypatch):
 @pytest.fixture
 def opened(review_id, stub_planning):
     """A vendor and a review at INTAKE, written the way the portal writes them."""
-    db = firestore_client()
-    db.collection("vendors").document(VENDOR["vendor_id"]).set(VENDOR)
+    tenant.collection("vendors").document(VENDOR["vendor_id"]).set(VENDOR)
 
     review = Review(
         review_id=review_id,
@@ -77,12 +77,13 @@ def opened(review_id, stub_planning):
         tier=1,
         opened_at=datetime.now(UTC),
     )
-    db.collection("reviews").document(review_id).set(review.model_dump(mode="json"))
+    tenant.collection("reviews").document(review_id).set(review.model_dump(mode="json"))
     return review
 
 
 def envelope(review_id: str, event_type: str, payload: dict | None = None) -> EventEnvelope:
     return EventEnvelope(
+        org_id=tenant.current_org(),
         type=event_type,
         review_id=review_id,
         idem_key=f"{review_id}:plan_v1:{event_type}",
@@ -246,7 +247,12 @@ def test_a_refused_send_raises_rather_than_returning_quietly(opened):
     from shared.gateway import call_tool
 
     run_intake(opened)
-    ctx = AgentContext(review_id=opened.review_id, agent="questionnaire", trace_id="t")
+    ctx = AgentContext(
+        org_id=tenancy.current_org(),
+        review_id=opened.review_id,
+        agent="questionnaire",
+        trace_id="t",
+    )
 
     with pytest.raises(PolicyViolation) as exc:
         call_tool(

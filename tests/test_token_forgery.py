@@ -20,8 +20,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from shared import approvals
+from shared import tenancy as tenant
 from shared.approvals import COLLECTION_APPROVALS, Approval, token_for
-from shared.clients import firestore_client
 from shared.gateway import SigningKeyUnavailable, issue_approval_token, verify_approval_token
 from tests.conftest import emulator_required
 
@@ -50,7 +50,7 @@ def write_approval(
         issued_at=now,
         expires_at=now + timedelta(minutes=expires_in_minutes),
     )
-    firestore_client().collection(COLLECTION_APPROVALS).document(approval.jti).set(
+    tenant.collection(COLLECTION_APPROVALS).document(approval.jti).set(
         approval.model_dump(mode="json")
     )
     return token_for(approval.jti)

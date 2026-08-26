@@ -23,6 +23,7 @@ from agents.watchdog.agent import (
 )
 from agents.watchdog.relevance import Action, evaluate, matches_identity
 from agents.watchdog.sources import EXPIRY_WARNING_DAYS, Signal, expiry_signals
+from shared import tenancy
 from shared.context import AgentContext
 from shared.domain import MemoryNote, RelevanceJudgement, Review, ReviewState, Vendor
 from tests.conftest import emulator_required
@@ -40,7 +41,12 @@ VENDOR = Vendor(
 
 
 def ctx(review_id: str = "watchdog") -> AgentContext:
-    return AgentContext(review_id=review_id, agent="watchdog", trace_id="t")
+    return AgentContext(
+        org_id=tenancy.current_org(),
+        review_id=review_id,
+        agent="watchdog",
+        trace_id="t",
+    )
 
 
 def feed_signal(**overrides) -> Signal:

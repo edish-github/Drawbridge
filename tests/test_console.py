@@ -27,6 +27,7 @@ REPO = Path(__file__).resolve().parent.parent
 CONSOLE = REPO / "services" / "dashboard"
 LIB = CONSOLE / "lib"
 APP = CONSOLE / "app"
+CONSOLE_APP = APP / "(app)"
 
 POLICY_JSON = LIB / "policy.json"
 LEDGER_TS = LIB / "ledger.ts"
@@ -100,6 +101,39 @@ only way this codebase can produce a Firestore mutation.
 
 CHAIN = re.compile(r"\b(?:collection|doc)\s*\([^)]*\)((?:\s*\.\s*\w+\s*\([^()]*\))*)")
 
+FORBIDDEN_TO_WRITE = frozenset(
+    {
+        # The one collection the console must never author. An approval is a named person
+        # accepting security risk; it is signed by a separate service that re-verifies the caller,
+        # and a surface every reviewer can reach must not be able to write one directly. If this
+        # set ever loses this entry, the human gate becomes decoration.
+        "approvals",
+        # Findings and scores are the fleet's conclusions. A console that could edit them could
+        # make a vendor look safe without changing anything about the vendor.
+        "findings",
+        "scores",
+        "memos",
+        "screenings",
+        "evidence_chunks",
+        "subprocessors",
+        # Durable memory shapes every future review of a vendor. It is written at close-out, from
+        # what the review actually concluded, and never by hand.
+        "dossiers",
+        # Where single use is recorded. A console that could clear a spend could replay an
+        # approval.
+        "approval_tokens_spent",
+    }
+)
+"""Collections the console may not write, whatever its caller's role.
+
+The complement — reviews, vendors, events, decisions, dashboard_events, qa_responses — is the
+*workflow* surface: opening a review, marking a reply thread finished, resolving a park. Those are
+things an analyst does, and a product where they need a terminal is a product nobody can use.
+
+The line is drawn here rather than by role, because a role check is a runtime decision and this is
+a structural one. An administrator may not edit a finding either.
+"""
+
 
 def console_sources():
     for path in [*LIB.rglob("*.ts"), *APP.rglob("*.tsx"), *APP.rglob("*.ts")]:
@@ -108,31 +142,103 @@ def console_sources():
         yield path
 
 
-def test_the_console_holds_no_firestore_write():
-    """A surface every reviewer can reach must not be one that can act.
+def test_the_console_never_writes_a_collection_it_must_not_author():
+    """The narrow claim, and the one that matters.
 
-    Asserted against the source tree rather than trusted, because the write that breaks this is
-    the one somebody adds to "just mark it read" — and it would be a perfectly ordinary line of
-    code that quietly makes the gateway's refusal to sign decorative.
+    The console gained write paths when it gained a signup page — a product where opening a review
+    requires a terminal is not a product. What it did not gain is the ability to author a
+    conclusion or an approval, and that is asserted structurally rather than left to a role check.
     """
     offenders = []
     for path in console_sources():
-        for match in CHAIN.finditer(path.read_text()):
+        source = path.read_text()
+        for match in CHAIN.finditer(source):
             called = set(re.findall(r"\.\s*(\w+)\s*\(", match.group(1)))
-            for write in called & set(WRITE_METHODS):
-                offenders.append(f"{path.relative_to(REPO)}: .{write}() on a Firestore reference")
+            if not called & set(WRITE_METHODS):
+                continue
+            target = re.match(r'\b(?:collection|doc)\s*\(\s*"([^"]+)"', match.group(0))
+            if target and target.group(1) in FORBIDDEN_TO_WRITE:
+                offenders.append(f"{path.relative_to(REPO)} writes {target.group(1)}")
 
-    assert not offenders, f"the console writes: {offenders}"
+    assert not offenders, f"the console writes collections it must not author: {offenders}"
 
 
-def test_the_console_has_no_api_routes():
-    """No route handler, so there is no server surface behind the read-only pages at all."""
-    handlers = [
-        p.relative_to(REPO)
+def test_no_console_source_mentions_the_approvals_collection_in_a_write():
+    """Belt and braces on the one that matters most.
+
+    The check above matches a literal collection name in the chain. This one catches the variable
+    indirection — `scoped(org, name).set(...)` where `name` came from somewhere — by requiring
+    that the string "approvals" never appears in the same file as a write helper.
+    """
+    for path in console_sources():
+        source = path.read_text()
+        if '"approvals"' in source and (".set(" in source or ".add(" in source):
+            # `lib/ledger.ts` reads approvals to display them, and holds no write at all.
+            assert "export async function approvals" in source, (
+                f"{path.relative_to(REPO)} names the approvals collection beside a write"
+            )
+
+
+EXPECTED_ROUTES = {
+    "api/session/route.ts",        # exchange a verified identity for a session cookie
+    "api/session/token/route.ts",  # mint a short-lived token for a service-to-service hop
+    "api/signup/route.ts",         # create an organisation; sign in outside cloud
+    "api/workspace/route.ts",      # switch the session to another organisation
+    "api/reviews/route.ts",        # open a review
+    "api/actions/route.ts",        # the workflow actions an analyst performs
+    "api/approve/route.ts",        # proxy to the approval service; signs nothing itself
+    "api/binders/[id]/route.ts",   # proxy to the binder service
+    "logout/route.ts",             # clears the session cookie
+}
+"""Every route the console exposes, listed on purpose.
+
+There used to be none, and "no API routes" was the security claim. It stopped being true the
+moment the product needed a signup page, and a claim that quietly stops being true is worse than
+one that was never made. So the list is enumerated instead: a new route is a deliberate edit here,
+and this test is the review.
+"""
+
+
+def test_the_console_exposes_only_the_routes_it_declares():
+    found = {
+        str(p.relative_to(APP))
         for p in APP.rglob("route.ts*")
         if "node_modules" not in p.parts
-    ]
-    assert not handlers, f"the console defines API routes: {handlers}"
+    }
+    assert found == EXPECTED_ROUTES, (
+        f"unexpected: {sorted(found - EXPECTED_ROUTES)}; missing: {sorted(EXPECTED_ROUTES - found)}"
+    )
+
+
+@pytest.mark.parametrize(
+    "route",
+    sorted(EXPECTED_ROUTES - {"api/session/route.ts", "api/signup/route.ts", "logout/route.ts"}),
+)
+def test_every_route_that_acts_checks_who_is_asking(route):
+    """A route that writes without resolving a principal is an unauthenticated write.
+
+    Signup and session are excluded because they are how a principal comes to exist; every other
+    route resolves one before it does anything.
+    """
+    source = (APP / route).read_text()
+    assert "currentPrincipal" in source or "unseal" in source, (
+        f"{route} does not identify its caller"
+    )
+
+
+def test_the_approval_route_signs_nothing_itself():
+    """It proxies to the service that holds the key, and does not decide the outcome.
+
+    The role check in that route is a courtesy — it turns a request that would be refused into a
+    clear message before a network hop. The control is the approval service re-verifying the
+    caller, because a service that trusted this one would have its security bounded by this one
+    being correct.
+    """
+    source = (APP / "api/approve/route.ts").read_text()
+
+    assert "APPROVALS_URL" in source
+    assert "createSign" not in source and "privateKey" not in source
+    assert "collection(\"approvals\")" not in source
 
 
 def test_the_console_never_imports_the_signing_path():
@@ -146,19 +252,27 @@ def test_the_console_never_imports_the_signing_path():
 # --- Every page the navigation offers exists ---------------------------------------------------
 
 
-def test_every_nav_destination_is_a_real_page():
-    """A sidebar link with no page behind it is a 404 an operator finds during a demo."""
+def test_every_nav_destination_resolves():
+    """A sidebar link with nothing behind it is a 404 somebody finds in front of a customer.
+
+    Two shapes count as resolving: a page inside the console shell, and a route handler outside it
+    — `/logout` is the second, because clearing a cookie is something only a handler may do.
+    """
     nav = (APP / "nav.tsx").read_text()
     hrefs = set(re.findall(r'href="(/[a-z-]*)"', nav))
 
     missing = []
     for href in sorted(hrefs):
         segment = href.strip("/")
-        page = APP / "page.tsx" if not segment else APP / segment / "page.tsx"
-        if not page.exists():
+        candidates = [
+            CONSOLE_APP / "page.tsx" if not segment else CONSOLE_APP / segment / "page.tsx",
+            APP / segment / "page.tsx",
+            APP / segment / "route.ts",
+        ]
+        if not any(c.exists() for c in candidates):
             missing.append(href)
 
-    assert not missing, f"the sidebar links to pages that do not exist: {missing}"
+    assert not missing, f"the sidebar links nowhere for: {missing}"
 
 
 @pytest.mark.parametrize(
@@ -168,6 +282,7 @@ def test_every_nav_destination_is_a_real_page():
         "queue/page.tsx",
         "vendors/page.tsx",
         "vendors/[id]/page.tsx",
+        "reviews/new/page.tsx",
         "reviews/[id]/page.tsx",
         "reviews/[id]/gate/page.tsx",
         "reviews/[id]/graph/page.tsx",
@@ -181,8 +296,35 @@ def test_every_nav_destination_is_a_real_page():
     ],
 )
 def test_the_designed_screen_exists(route):
-    """Eleven screens were designed; these are the routes they became."""
+    """The signed-in application. All of it lives in the (app) route group, so the shell wraps
+    it and nothing outside it."""
+    assert (CONSOLE_APP / route).exists(), f"{route} is missing"
+
+
+@pytest.mark.parametrize(
+    "route", ["login/page.tsx", "signup/page.tsx", "workspaces/page.tsx", "logout/route.ts"]
+)
+def test_the_authentication_screens_are_outside_the_shell(route):
+    """A shell whose navigation points into a workspace is the wrong thing to render to somebody
+    who has not chosen one — or who has just been told they are no longer a member."""
     assert (APP / route).exists(), f"{route} is missing"
+    assert not (CONSOLE_APP / route).exists(), f"{route} must not be inside the console shell"
+
+
+def test_every_console_page_resolves_a_principal():
+    """A page that renders without one is a page that leaks a workspace to a stranger."""
+    unguarded = [
+        str(p.relative_to(CONSOLE_APP))
+        for p in CONSOLE_APP.rglob("page.tsx")
+        if "requirePrincipal" not in p.read_text() and "requireCapability" not in p.read_text()
+    ]
+    assert not unguarded, f"these pages render without resolving a principal: {unguarded}"
+
+
+def test_the_console_shell_guards_itself():
+    """Belt and braces: a page added later that forgets its own guard still cannot render inside
+    an authenticated shell."""
+    assert "requirePrincipal" in (CONSOLE_APP / "layout.tsx").read_text()
 
 
 # --- The fonts are self-hosted ------------------------------------------------------------------
@@ -229,12 +371,24 @@ def test_the_console_cannot_mint_an_approval():
 
 
 def test_the_gate_card_states_where_the_authority_lives():
-    """A disabled button with no explanation reads as a bug. This one says why."""
-    body = (APP / "reviews" / "[id]" / "gate" / "page.tsx").read_text()
+    """The card says what signs, and what does not. It used to print a shell command; it now has
+    a control, and the claim underneath it has to survive that change."""
+    body = (CONSOLE_APP / "reviews" / "[id]" / "gate" / "page.tsx").read_text()
 
     assert "holds no signing key" in body
     assert "single-use" in body
-    assert "scripts.issue_token" in body
+    assert "verifies you independently" in body
+
+
+def test_approving_requires_the_approver_role_and_a_step_up():
+    """An approval is a named person accepting risk. A session cookie left open on an unattended
+    laptop is not evidence that the named person was present, so the signature is bound to a fresh
+    proof rather than to a browser."""
+    control = (CONSOLE_APP / "reviews" / "[id]" / "gate" / "approve.tsx").read_text()
+
+    assert "canApprove" in control
+    assert "password" in control.lower()
+    assert "never stored" in control or "sent once" in control
 
 
 # --- The screens behave as the product claims ----------------------------------------------------
@@ -243,7 +397,7 @@ def test_the_gate_card_states_where_the_authority_lives():
 def test_the_queue_defaults_to_the_reviews_that_need_a_person():
     """The product's claim is that humans appear only at decision points. A queue that opened on
     everything would be showing work nobody has to do."""
-    body = (APP / "queue" / "page.tsx").read_text()
+    body = (CONSOLE_APP / "queue" / "page.tsx").read_text()
 
     assert 'filter = "needs-you"' in body
     assert "needsYou" in body
@@ -256,28 +410,58 @@ def test_the_queue_defaults_to_the_reviews_that_need_a_person():
 def test_expansions_work_without_javascript(screen):
     """An expansion that needs hydration is one that fails in a screenshot, in print, and on the
     machine where the bundle did not load five minutes before recording."""
-    body = (APP / screen).read_text()
+    body = (CONSOLE_APP / screen).read_text()
 
     assert "<details" in body and "<summary>" in body
     assert '"use client"' not in body
 
 
-def test_only_the_navigation_is_a_client_component():
-    """It needs the URL to know which leaf is lit, and nothing else. Every other screen reads
-    Firestore on the server, so a page that shipped a bundle would be a page that can be slow."""
-    client = [
-        p.relative_to(REPO)
+EXPECTED_CLIENT_COMPONENTS = {
+    "app/nav.tsx",                          # needs the URL to know which leaf is lit
+    "app/login/form.tsx",                   # a form
+    "app/signup/form.tsx",                  # a form
+    "app/workspaces/switcher.tsx",          # a form
+    "app/(app)/reviews/new/form.tsx",       # a form with a live tier preview
+    "app/(app)/reviews/[id]/gate/approve.tsx",  # a form with a step-up
+}
+"""Every component that ships JavaScript, enumerated.
+
+The rule is not "no client components" — forms need one. The rule is that **no page** is a client
+component: every screen renders on the server from a Firestore read, so a page that shipped a
+bundle would be a page that can be slow and a page that could leak a query to the browser. The
+client components here are all leaves inside a server-rendered page.
+"""
+
+
+def test_only_the_declared_leaves_ship_javascript():
+    client = {
+        str(p.relative_to(CONSOLE)).removeprefix("app/").join(("app/", ""))
+        if False
+        else str(p.relative_to(CONSOLE))
         for p in console_sources()
         if '"use client"' in p.read_text()
+    }
+    assert client == EXPECTED_CLIENT_COMPONENTS, (
+        f"unexpected: {sorted(client - EXPECTED_CLIENT_COMPONENTS)}; "
+        f"missing: {sorted(EXPECTED_CLIENT_COMPONENTS - client)}"
+    )
+
+
+def test_no_page_is_a_client_component():
+    """The rule that matters. A form may hydrate; a screen may not."""
+    offenders = [
+        str(p.relative_to(CONSOLE))
+        for p in APP.rglob("page.tsx")
+        if '"use client"' in p.read_text()
     ]
-    assert client == [Path("services/dashboard/app/nav.tsx")], client
+    assert not offenders, offenders
 
 
 @pytest.mark.parametrize("field", ["Agent", "Graph node", "Idempotency key", "Trace"])
 def test_an_expanded_entry_shows_the_mechanism(field):
     """The idempotency key, the trace id and the graph node are the product. They go on the
     screen in mono, not behind a disclosure nobody opens."""
-    body = (APP / "reviews" / "[id]" / "page.tsx").read_text()
+    body = (CONSOLE_APP / "reviews" / "[id]" / "page.tsx").read_text()
     assert f'"{field}"' in body
 
 

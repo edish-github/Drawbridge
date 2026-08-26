@@ -30,6 +30,7 @@ from agents.evidence.subprocessors import (
     diff,
     resolve,
 )
+from shared import tenancy
 from shared.context import AgentContext
 from shared.domain import Subprocessor
 from tests.conftest import emulator_required
@@ -460,7 +461,12 @@ def _gap_cards(db, review_id: str) -> list[dict]:
 
 
 def _ctx(review_id: str) -> AgentContext:
-    return AgentContext(review_id=review_id, agent="evidence", trace_id="t")
+    return AgentContext(
+        org_id=tenancy.current_org(),
+        review_id=review_id,
+        agent="evidence",
+        trace_id="t",
+    )
 
 
 def _register():

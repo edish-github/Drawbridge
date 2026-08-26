@@ -100,6 +100,31 @@ def _drain_subscriptions(_local_mode_env):
             )
 
 
+TEST_ORG = "test-org"
+"""The tenant every test runs under.
+
+One shared org rather than one per test, deliberately: tests already isolate on ``review_id``,
+and a fresh org per test would make the emulator's ``orgs`` collection grow by one document per
+test run without testing anything the shared org does not. Tests that are *about* isolation
+create their own orgs and say so.
+"""
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _tenant():
+    """Run every test on behalf of one organisation.
+
+    Autouse and **session-scoped**. Function scope was the first attempt and it left every
+    module- and session-scoped fixture running outside a tenant — including the demo-flow
+    fixture that drives a whole review — so the scope has to be the outermost one. A test that
+    wants a different org nests its own ``acting_for``, which restores cleanly on exit.
+    """
+    from shared import tenancy
+
+    with tenancy.acting_for(TEST_ORG):
+        yield TEST_ORG
+
+
 @pytest.fixture
 def review_id() -> str:
     """A unique review id per test, so emulator state cannot leak between tests."""
@@ -108,6 +133,32 @@ def review_id() -> str:
 
 @pytest.fixture
 def db():
+    """A tenant-scoped stand-in for the raw Firestore client.
+
+    Tests were written against ``db.collection("reviews")`` and there are hundreds of those
+    calls. Rather than rewrite each one, the fixture returns an object whose ``collection`` is
+    the tenant-scoped one — so a test reaches the same rows the fleet does, through the same
+    path, without knowing the path exists.
+
+    ``collection_group`` is exposed too, for the handful of tests that legitimately read across
+    tenants.
+    """
+    from shared import tenancy
     from shared.clients import firestore_client
 
-    return firestore_client()
+    class ScopedDb:
+        def collection(self, name: str):
+            return tenancy.collection(name)
+
+        def collection_group(self, name: str):
+            return firestore_client().collection_group(name)
+
+        def transaction(self):
+            return firestore_client().transaction()
+
+        @property
+        def raw(self):
+            """The unscoped client, for tests that assert on platform collections."""
+            return firestore_client()
+
+    return ScopedDb()

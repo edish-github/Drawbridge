@@ -32,6 +32,8 @@ import yaml
 
 from agents.evidence.extractors import MAX_DOCUMENT_CHARS
 from fixtures.public.fetch import SOURCES, path_for, present, sources
+from shared import tenancy
+from shared import tenancy as tenant
 from shared.extraction import extract
 from tests.conftest import emulator_required
 
@@ -257,7 +259,12 @@ def test_what_the_extractor_reads_off_a_real_report(review_id, text):
     indexed = index_chunks(ref, review_id)
 
     facts = extract_document_facts(
-        ref, review_id, AgentContext(review_id=review_id, agent="evidence", trace_id="t")
+        ref, review_id, AgentContext(
+            org_id=tenancy.current_org(),
+            review_id=review_id,
+            agent="evidence",
+            trace_id="t",
+        )
     )
 
     # Written before the assertions, so a call that was spent is a call that was recorded. The
@@ -300,10 +307,9 @@ def test_a_real_document_cannot_be_run_through_a_scored_review():
     named organisation terminates at the first step, in code, rather than at somebody's
     restraint.
     """
-    from shared.clients import firestore_client
 
     for entry in sources():
-        assert not firestore_client().collection("vendors").document(entry["id"]).get().exists
+        assert not tenant.collection("vendors").document(entry["id"]).get().exists
 
 
 def test_no_public_document_is_vendored():

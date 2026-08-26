@@ -32,6 +32,7 @@ import signal
 import sys
 from types import SimpleNamespace
 
+from shared import tenancy as tenant
 from shared.checkpoint import completed_steps, step
 from shared.clients import firestore_client
 from shared.idempotency import ReconciliationRequired, key_for, once
@@ -50,7 +51,7 @@ def send_email(review_id: str, vendor: str, kill_at: str) -> dict:
     if kill_at == "after_claim":
         crash()
 
-    firestore_client().collection("inbox").add(
+    tenant.collection("inbox").add(
         {"review_id": review_id, "vendor": vendor, "subject": "Security review"}
     )
 
@@ -95,8 +96,14 @@ def main() -> int:
         default="none",
         choices=("none", "before_send", "after_claim", "after_send"),
     )
+    # The tenant is passed in rather than inherited: this is a real subprocess, and a context
+    # variable does not survive a fork-exec. Passing it explicitly is also what a deployed
+    # worker does, so the harness exercises the same shape.
+    parser.add_argument("--org", default=None)
     args = parser.parse_args()
-    return run(args.review_id, args.vendor, args.kill_at)
+
+    with tenant.acting_for(args.org or tenant.cli_org()):
+        return run(args.review_id, args.vendor, args.kill_at)
 
 
 if __name__ == "__main__":

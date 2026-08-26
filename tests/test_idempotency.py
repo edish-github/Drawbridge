@@ -31,10 +31,17 @@ WORKER = "tests.support.worker"
 
 
 def run_worker(review_id: str, kill_at: str = "none", vendor: str = "nimbuswrite"):
-    """Run the worker in its own process so a SIGKILL is a real process death."""
+    """Run the worker in its own process so a SIGKILL is a real process death.
+
+    The tenant is passed on the command line because a context variable does not survive a
+    fork-exec — which is also true of a deployed worker, so the harness exercises the real shape
+    rather than a convenience the product does not have.
+    """
+    from shared import tenancy
+
     return subprocess.run(
         [sys.executable, "-m", WORKER, "--review-id", review_id,
-         "--kill-at", kill_at, "--vendor", vendor],
+         "--kill-at", kill_at, "--vendor", vendor, "--org", tenancy.current_org()],
         cwd=REPO,
         capture_output=True,
         text=True,

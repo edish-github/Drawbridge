@@ -16,6 +16,7 @@ import os
 
 import pytest
 
+from shared import tenancy
 from shared.armor import (
     CRITICAL_FILTERS,
     EXECUTION_SKIPPED,
@@ -38,7 +39,12 @@ REAL_TEMPLATE = "drawbridge-untrusted"
 
 
 def ctx(review_id: str) -> AgentContext:
-    return AgentContext(review_id=review_id, agent="test", trace_id="t")
+    return AgentContext(
+        org_id=tenancy.current_org(),
+        review_id=review_id,
+        agent="test",
+        trace_id="t",
+    )
 
 
 def verdict(

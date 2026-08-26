@@ -11,6 +11,7 @@ rather than deleted, because a defined behaviour with no test is a gap worth see
 
 import pytest
 
+from shared import tenancy as tenant
 from tests.conftest import emulator_required
 
 
@@ -66,6 +67,7 @@ def envelope_for(review_id: str, topic: str = "evidence.screened"):
     from shared.events import EventEnvelope
 
     return EventEnvelope(
+        org_id=tenant.current_org(),
         type=topic,
         review_id=review_id,
         idem_key=f"{review_id}:plan_v1:{topic}",

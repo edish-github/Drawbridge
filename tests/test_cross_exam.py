@@ -19,6 +19,7 @@ from agents.evidence.cross_exam import Claim, persist_shape, reconcile_claim
 from agents.evidence.retrieval import resolve_chunk
 from scenarios.fixtures import responding_from
 from scenarios.seed import seed_clean_evidence
+from shared import tenancy
 from shared.context import AgentContext
 from shared.domain import FindingDraft
 from tests.conftest import emulator_required
@@ -48,7 +49,12 @@ def datadynamo(review_id):
 
 
 def ctx(review_id: str) -> AgentContext:
-    return AgentContext(review_id=review_id, agent="evidence", trace_id="t")
+    return AgentContext(
+        org_id=tenancy.current_org(),
+        review_id=review_id,
+        agent="evidence",
+        trace_id="t",
+    )
 
 
 # --- The hero finding -------------------------------------------------------------------------

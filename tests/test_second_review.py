@@ -19,6 +19,7 @@ import pytest
 from agents.orchestrator.closeout import RATING_USABLE, digest, notes_for, rate, remember_review
 from agents.orchestrator.recall import Recalled, recall
 from agents.questionnaire.generator import load_bank
+from shared import tenancy
 from shared.domain import Review, ReviewState
 from shared.memory import CONTROLLED_VOCABULARY, MAX_VALUE_WORDS, NoteRejected, remember
 from tests.conftest import emulator_required
@@ -266,7 +267,12 @@ def test_the_tier_never_falls_across_reviews(first, db, monkeypatch):
     plan = planner.generate_plan(
         vendor,
         recall_dossier(VENDOR_ID),
-        AgentContext(review_id="second", agent="orchestrator", trace_id="t"),
+        AgentContext(
+            org_id=tenancy.current_org(),
+            review_id="second",
+            agent="orchestrator",
+            trace_id="t",
+        ),
     )
 
     assert plan.tier == 1

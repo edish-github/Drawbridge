@@ -39,12 +39,36 @@ rather than a set of ids to track.
 """
 
 
+PROBE_ORG = "iam-probe-org"
+"""The organisation the probes act inside.
+
+Tenant collections live at ``orgs/{org}/…``, so a probe that wrote to the root would be testing
+a path no rule covers and would fail for the wrong reason. A dedicated org rather than the
+suite's, so the sweep at the bottom can be exhaustive without touching data other tests rely on.
+"""
+
+
+def _ref(identity: str, collection: str):
+    """The document a probe writes, at the path the product actually uses."""
+    from shared.tenancy import COLLECTION_ORGS, GLOBAL_COLLECTIONS
+
+    client = as_identity(identity)
+    if collection in GLOBAL_COLLECTIONS:
+        return client.collection(collection).document(DOC)
+    return (
+        client.collection(COLLECTION_ORGS)
+        .document(PROBE_ORG)
+        .collection(collection)
+        .document(DOC)
+    )
+
+
 def write_as(identity: str, collection: str) -> None:
-    as_identity(identity).collection(collection).document(DOC).set({"probe": True})
+    _ref(identity, collection).set({"probe": True})
 
 
 def read_as(identity: str, collection: str) -> None:
-    as_identity(identity).collection(collection).document(DOC).get()
+    _ref(identity, collection).get()
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -65,14 +89,21 @@ def _sweep_probes():
         return
 
     from shared.clients import firestore_client
+    from shared.tenancy import COLLECTION_ORGS, GLOBAL_COLLECTIONS
 
     db = firestore_client()
     for _, collection, may_write in rows():
-        if may_write:
-            try:
+        if not may_write:
+            continue
+        try:
+            if collection in GLOBAL_COLLECTIONS:
                 db.collection(collection).document(DOC).delete()
-            except Exception:  # noqa: BLE001 — a sweep that fails must not fail the suite
-                pass
+            else:
+                db.collection(COLLECTION_ORGS).document(PROBE_ORG).collection(
+                    collection
+                ).document(DOC).delete()
+        except Exception:  # noqa: BLE001 — a sweep that fails must not fail the suite
+            pass
 
 
 # --- Every row in the matrix, both directions ------------------------------------------------
