@@ -1,0 +1,32 @@
+# The event worker.
+#
+# Not a web service: it pulls from Pub/Sub in a synchronous loop and dispatches to the agents.
+# Same base image as everything else, different entrypoint.
+#
+# **Single-threaded, deliberately.** The streaming-pull client runs handlers on a background
+# thread pool, which makes a SIGKILL mid-step land somewhere non-deterministic and makes "the
+# current organisation" a property of whichever callback last ran. A blocking loop dies exactly
+# where the kill lands and adopts exactly one tenant per message.
+
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir "."
+
+COPY shared/ ./shared/
+COPY agents/ ./agents/
+COPY services/ ./services/
+COPY scripts/ ./scripts/
+
+RUN useradd --create-home --shell /usr/sbin/nologin drawbridge \
+    && chown -R drawbridge:drawbridge /app
+USER drawbridge
+
+# No PORT: this container serves nothing. Deploy it as a Cloud Run *job* on a schedule, or as a
+# service with `--no-cpu-throttling` if you want it resident — the loop is the same either way,
+# and so is the recovery, because the review's position is in Firestore rather than in here.
+CMD ["python", "-m", "scripts.run_local"]

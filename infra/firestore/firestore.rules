@@ -13,166 +13,211 @@ service cloud.firestore {
       return request.auth.token.email;
     }
 
-
-    match /approval_tokens_spent/{doc} {
-      // read:  sa-questionnaire
-      // write: sa-questionnaire
-      allow read: if caller() in ['sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
+    // A signed-in person, as opposed to one of the fleet's service accounts. Human callers
+    // reach their own organisation's data and nothing else; the check is a membership document
+    // read, which is why membership ids are `{orgId}:{uid}` rather than a query.
+    function isMember(orgId) {
+      return request.auth != null
+        && request.auth.uid != null
+        && exists(/databases/$(database)/documents/memberships/$(orgId + ':' + request.auth.uid))
+        && get(/databases/$(database)/documents/memberships/$(orgId + ':' + request.auth.uid))
+             .data.status == 'active';
     }
 
-    match /approvals/{doc} {
-      // read:  sa-questionnaire, sa-dashboard, sa-approvals, sa-binder
-      // write: sa-approvals
-      allow read: if caller() in ['sa-approvals@drawbridge-hack.iam.gserviceaccount.com', 'sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-approvals@drawbridge-hack.iam.gserviceaccount.com'];
+    function memberRole(orgId) {
+      return get(/databases/$(database)/documents/memberships/$(orgId + ':' + request.auth.uid))
+               .data.role;
     }
 
-    match /approved_vendors/{doc} {
-      // read:  sa-evidence, sa-watchdog
-      // write: nobody
-      allow read: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if false;
+
+    // --- Platform. Outside any organisation, because they are how organisations exist.
+
+    match /orgs/{doc} {
+      // read:  sa-portal, sa-dashboard, sa-identity
+      // write: sa-identity
+      allow read: if caller() in ['sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-identity@drawbridge-hack.iam.gserviceaccount.com', 'sa-portal@drawbridge-hack.iam.gserviceaccount.com'];
+      allow write: if caller() in ['sa-identity@drawbridge-hack.iam.gserviceaccount.com'];
     }
 
-    match /dashboard_events/{doc} {
-      // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog, sa-dashboard, sa-binder
-      // write: sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog
-      allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
+    match /users/{doc} {
+      // read:  sa-dashboard, sa-identity
+      // write: sa-identity
+      allow read: if caller() in ['sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-identity@drawbridge-hack.iam.gserviceaccount.com'];
+      allow write: if caller() in ['sa-identity@drawbridge-hack.iam.gserviceaccount.com'];
     }
 
-    match /data_scope_classifications/{doc} {
-      // read:  sa-orchestrator, sa-binder
-      // write: sa-orchestrator
-      allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com'];
+    match /memberships/{doc} {
+      // read:  sa-dashboard, sa-identity
+      // write: sa-identity
+      allow read: if caller() in ['sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-identity@drawbridge-hack.iam.gserviceaccount.com'] || (request.auth != null && resource.data.uid == request.auth.uid);
+      allow write: if caller() in ['sa-identity@drawbridge-hack.iam.gserviceaccount.com'];
     }
 
-    match /decisions/{doc} {
-      // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog, sa-dashboard, sa-binder
-      // write: sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog
-      allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+    // --- Tenanted. The path is the isolation: there is no way to name one of
+    // these collections without naming the organisation that owns it.
 
-    match /dossiers/{doc} {
-      // read:  sa-orchestrator, sa-scorer
-      // write: sa-scorer
-      allow read: if caller() in ['sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-scorer@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+    match /orgs/{orgId} {
 
-    match /events/{doc} {
-      // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog, sa-armor, sa-portal, sa-dashboard, sa-approvals, sa-binder
-      // write: sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog, sa-armor, sa-portal, sa-dashboard, sa-approvals
-      allow read: if caller() in ['sa-approvals@drawbridge-hack.iam.gserviceaccount.com', 'sa-armor@drawbridge-hack.iam.gserviceaccount.com', 'sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-portal@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-approvals@drawbridge-hack.iam.gserviceaccount.com', 'sa-armor@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-portal@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+      match /approval_tokens_spent/{doc} {
+        // read:  sa-questionnaire
+        // write: sa-questionnaire
+        allow read: if caller() in ['sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
+      }
 
-    match /evidence_chunks/{doc} {
-      // read:  sa-evidence, sa-binder
-      // write: sa-evidence
-      allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+      match /approvals/{doc} {
+        // read:  sa-questionnaire, sa-dashboard, sa-approvals, sa-binder
+        // write: sa-approvals
+        allow read: if caller() in ['sa-approvals@drawbridge-hack.iam.gserviceaccount.com', 'sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-approvals@drawbridge-hack.iam.gserviceaccount.com'];
+      }
 
-    match /findings/{doc} {
-      // read:  sa-orchestrator, sa-evidence, sa-scorer, sa-dashboard, sa-approvals, sa-binder
-      // write: sa-evidence, sa-scorer
-      allow read: if caller() in ['sa-approvals@drawbridge-hack.iam.gserviceaccount.com', 'sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+      match /approved_vendors/{doc} {
+        // read:  sa-evidence, sa-watchdog
+        // write: nobody
+        allow read: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if false;
+      }
 
-    match /followups/{doc} {
-      // read:  sa-questionnaire, sa-dashboard, sa-binder
-      // write: sa-questionnaire
-      allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+      match /dashboard_events/{doc} {
+        // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog, sa-dashboard, sa-binder
+        // write: sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog
+        allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
+      }
 
-    match /idempotency/{doc} {
-      // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog
-      // write: sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog
-      allow read: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+      match /data_scope_classifications/{doc} {
+        // read:  sa-orchestrator, sa-binder
+        // write: sa-orchestrator
+        allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com'];
+      }
 
-    match /inbox/{doc} {
-      // read:  sa-questionnaire, sa-dashboard
-      // write: sa-questionnaire
-      allow read: if caller() in ['sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+      match /decisions/{doc} {
+        // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog, sa-dashboard, sa-binder
+        // write: sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog
+        allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
+      }
 
-    match /inert_excerpts/{doc} {
-      // read:  sa-armor, sa-binder
-      // write: sa-armor
-      allow read: if caller() in ['sa-armor@drawbridge-hack.iam.gserviceaccount.com', 'sa-binder@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-armor@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+      match /dossiers/{doc} {
+        // read:  sa-orchestrator, sa-scorer
+        // write: sa-scorer
+        allow read: if caller() in ['sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-scorer@drawbridge-hack.iam.gserviceaccount.com'];
+      }
 
-    match /memos/{doc} {
-      // read:  sa-orchestrator, sa-scorer, sa-dashboard, sa-binder
-      // write: sa-scorer
-      allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-scorer@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+      match /events/{doc} {
+        // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog, sa-armor, sa-portal, sa-dashboard, sa-approvals, sa-identity, sa-binder
+        // write: sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog, sa-armor, sa-portal, sa-dashboard, sa-approvals, sa-identity
+        allow read: if caller() in ['sa-approvals@drawbridge-hack.iam.gserviceaccount.com', 'sa-armor@drawbridge-hack.iam.gserviceaccount.com', 'sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-identity@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-portal@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-approvals@drawbridge-hack.iam.gserviceaccount.com', 'sa-armor@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-identity@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-portal@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
+      }
 
-    match /qa_responses/{doc} {
-      // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-portal, sa-binder
-      // write: sa-questionnaire, sa-portal
-      allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-portal@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-portal@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+      match /evidence_chunks/{doc} {
+        // read:  sa-evidence, sa-binder
+        // write: sa-evidence
+        allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com'];
+      }
 
-    match /qa_responses_superseded/{doc} {
-      // read:  sa-questionnaire, sa-binder
-      // write: sa-questionnaire
-      allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+      match /findings/{doc} {
+        // read:  sa-orchestrator, sa-evidence, sa-scorer, sa-dashboard, sa-approvals, sa-binder
+        // write: sa-evidence, sa-scorer
+        allow read: if caller() in ['sa-approvals@drawbridge-hack.iam.gserviceaccount.com', 'sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com'];
+      }
 
-    match /reviews/{doc} {
-      // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog, sa-armor, sa-portal, sa-dashboard, sa-approvals, sa-binder
-      // write: sa-orchestrator, sa-questionnaire, sa-watchdog
-      allow read: if caller() in ['sa-approvals@drawbridge-hack.iam.gserviceaccount.com', 'sa-armor@drawbridge-hack.iam.gserviceaccount.com', 'sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-portal@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+      match /followups/{doc} {
+        // read:  sa-questionnaire, sa-dashboard, sa-binder
+        // write: sa-questionnaire
+        allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
+      }
 
-    match /scores/{doc} {
-      // read:  sa-orchestrator, sa-scorer, sa-watchdog, sa-dashboard, sa-approvals, sa-binder
-      // write: sa-scorer
-      allow read: if caller() in ['sa-approvals@drawbridge-hack.iam.gserviceaccount.com', 'sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-scorer@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+      match /idempotency/{doc} {
+        // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog
+        // write: sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog
+        allow read: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
+      }
 
-    match /screenings/{doc} {
-      // read:  sa-orchestrator, sa-scorer, sa-armor, sa-dashboard, sa-binder
-      // write: sa-armor
-      allow read: if caller() in ['sa-armor@drawbridge-hack.iam.gserviceaccount.com', 'sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-armor@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+      match /inbox/{doc} {
+        // read:  sa-questionnaire, sa-dashboard
+        // write: sa-questionnaire
+        allow read: if caller() in ['sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
+      }
 
-    match /subprocessors/{doc} {
-      // read:  sa-evidence, sa-binder
-      // write: sa-evidence
-      allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+      match /inert_excerpts/{doc} {
+        // read:  sa-armor, sa-binder
+        // write: sa-armor
+        allow read: if caller() in ['sa-armor@drawbridge-hack.iam.gserviceaccount.com', 'sa-binder@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-armor@drawbridge-hack.iam.gserviceaccount.com'];
+      }
 
-    match /tasks/{doc} {
-      // read:  sa-watchdog, sa-dashboard, sa-binder
-      // write: sa-watchdog
-      allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if caller() in ['sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
-    }
+      match /memos/{doc} {
+        // read:  sa-orchestrator, sa-scorer, sa-dashboard, sa-binder
+        // write: sa-scorer
+        allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-scorer@drawbridge-hack.iam.gserviceaccount.com'];
+      }
 
-    match /vendors/{doc} {
-      // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog, sa-dashboard, sa-binder
-      // write: nobody
-      allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
-      allow write: if false;
+      match /qa_responses/{doc} {
+        // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-portal, sa-binder
+        // write: sa-questionnaire, sa-portal
+        allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-portal@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-portal@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
+      }
+
+      match /qa_responses_superseded/{doc} {
+        // read:  sa-questionnaire, sa-binder
+        // write: sa-questionnaire
+        allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com'];
+      }
+
+      match /reviews/{doc} {
+        // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog, sa-armor, sa-portal, sa-dashboard, sa-approvals, sa-binder
+        // write: sa-orchestrator, sa-questionnaire, sa-watchdog
+        allow read: if caller() in ['sa-approvals@drawbridge-hack.iam.gserviceaccount.com', 'sa-armor@drawbridge-hack.iam.gserviceaccount.com', 'sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-portal@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
+      }
+
+      match /scores/{doc} {
+        // read:  sa-orchestrator, sa-scorer, sa-watchdog, sa-dashboard, sa-approvals, sa-binder
+        // write: sa-scorer
+        allow read: if caller() in ['sa-approvals@drawbridge-hack.iam.gserviceaccount.com', 'sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-scorer@drawbridge-hack.iam.gserviceaccount.com'];
+      }
+
+      match /screenings/{doc} {
+        // read:  sa-orchestrator, sa-scorer, sa-armor, sa-dashboard, sa-binder
+        // write: sa-armor
+        allow read: if caller() in ['sa-armor@drawbridge-hack.iam.gserviceaccount.com', 'sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-armor@drawbridge-hack.iam.gserviceaccount.com'];
+      }
+
+      match /subprocessors/{doc} {
+        // read:  sa-evidence, sa-binder
+        // write: sa-evidence
+        allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-evidence@drawbridge-hack.iam.gserviceaccount.com'];
+      }
+
+      match /tasks/{doc} {
+        // read:  sa-watchdog, sa-dashboard, sa-binder
+        // write: sa-watchdog
+        allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if caller() in ['sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'];
+      }
+
+      match /vendors/{doc} {
+        // read:  sa-orchestrator, sa-questionnaire, sa-evidence, sa-scorer, sa-watchdog, sa-dashboard, sa-binder
+        // write: nobody
+        allow read: if caller() in ['sa-binder@drawbridge-hack.iam.gserviceaccount.com', 'sa-dashboard@drawbridge-hack.iam.gserviceaccount.com', 'sa-evidence@drawbridge-hack.iam.gserviceaccount.com', 'sa-orchestrator@drawbridge-hack.iam.gserviceaccount.com', 'sa-questionnaire@drawbridge-hack.iam.gserviceaccount.com', 'sa-scorer@drawbridge-hack.iam.gserviceaccount.com', 'sa-watchdog@drawbridge-hack.iam.gserviceaccount.com'] || isMember(orgId);
+        allow write: if false;
+      }
     }
 
     // Anything not named above.

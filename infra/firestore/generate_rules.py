@@ -9,6 +9,13 @@ Rules are deny-by-default: a collection with no declared reader or writer is rea
 writable by nobody, so adding a collection to the code without adding it to the matrix fails
 loudly rather than inheriting someone else's access.
 
+**Two shapes, because there are two kinds of collection.** The three platform collections —
+``orgs``, ``users``, ``memberships`` — sit at the root. Every other collection lives under
+``orgs/{orgId}/``, which is where tenant isolation is enforced: a path is the only way to reach
+a customer's data, and the rule for it is scoped to that path. The collection-level matrix is
+preserved inside the org block, so both properties hold at once — *which service* may touch a
+collection, and *whose copy* of it.
+
 Failure semantics: an identity naming a collection that no other identity declares is
 allowed — a collection may legitimately have one writer — but an empty matrix, or one with no
 identities, raises rather than emitting a ruleset that would lock the project out.
@@ -37,6 +44,22 @@ service cloud.firestore {
 
     function caller() {
       return request.auth.token.email;
+    }
+
+    // A signed-in person, as opposed to one of the fleet's service accounts. Human callers
+    // reach their own organisation's data and nothing else; the check is a membership document
+    // read, which is why membership ids are `{orgId}:{uid}` rather than a query.
+    function isMember(orgId) {
+      return request.auth != null
+        && request.auth.uid != null
+        && exists(/databases/$(database)/documents/memberships/$(orgId + ':' + request.auth.uid))
+        && get(/databases/$(database)/documents/memberships/$(orgId + ':' + request.auth.uid))
+             .data.status == 'active';
+    }
+
+    function memberRole(orgId) {
+      return get(/databases/$(database)/documents/memberships/$(orgId + ':' + request.auth.uid))
+               .data.role;
     }
 """
 
@@ -77,17 +100,59 @@ def collect(matrix: dict) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     return readers, writers
 
 
+GLOBAL_COLLECTIONS = ("orgs", "users", "memberships")
+"""The three collections that sit outside any organisation, because they are how organisations
+exist. Mirrored from ``shared.tenancy.GLOBAL_COLLECTIONS``; ``tests/test_tenancy.py`` asserts the
+two lists agree, because a collection treated as global on one side and tenant-scoped on the
+other would be reachable at a path no rule covers."""
+
+
 def render(readers: dict[str, list[str]], writers: dict[str, list[str]], project: str) -> str:
     out = [HEADER]
-    for collection in sorted(set(readers) | set(writers)):
+
+    # --- Platform collections, at the root -------------------------------------------------
+    out.append(
+        "\n    // --- Platform. Outside any organisation, because they are how "
+        "organisations exist."
+    )
+    for collection in GLOBAL_COLLECTIONS:
         r = readers.get(collection, [])
         w = writers.get(collection, [])
         out.append(f"\n    match /{collection}/{{doc}} {{")
         out.append(f"      // read:  {', '.join(r) or 'nobody'}")
         out.append(f"      // write: {', '.join(w) or 'nobody'}")
-        out.append(f"      allow read: if {_membership(r, project)};")
+        if collection == "memberships":
+            # A person may read their own membership, and only their own. Without this the
+            # isMember() check above could not be evaluated by the caller it is about.
+            out.append(
+                "      allow read: if "
+                + _membership(r, project)
+                + " || (request.auth != null && resource.data.uid == request.auth.uid);"
+            )
+        else:
+            out.append(f"      allow read: if {_membership(r, project)};")
         out.append(f"      allow write: if {_membership(w, project)};")
         out.append("    }")
+
+    # --- Tenant collections, under the org that owns them ----------------------------------
+    out.append("\n    // --- Tenanted. The path is the isolation: there is no way to name one of")
+    out.append("    // these collections without naming the organisation that owns it.")
+    out.append("\n    match /orgs/{orgId} {")
+    for collection in sorted((set(readers) | set(writers)) - set(GLOBAL_COLLECTIONS)):
+        r = readers.get(collection, [])
+        w = writers.get(collection, [])
+        out.append(f"\n      match /{collection}/{{doc}} {{")
+        out.append(f"        // read:  {', '.join(r) or 'nobody'}")
+        out.append(f"        // write: {', '.join(w) or 'nobody'}")
+        # A service account reaches every tenant, because the fleet works on behalf of all of
+        # them; a person reaches only the organisations they belong to. Both conditions are
+        # required to read, and only the fleet may write — every human write goes through a
+        # service that checks a role first.
+        out.append(f"        allow read: if {_membership(r, project)} || isMember(orgId);")
+        out.append(f"        allow write: if {_membership(w, project)};")
+        out.append("      }")
+    out.append("    }")
+
     out.append(FOOTER)
     return "\n".join(out)
 
@@ -133,7 +198,7 @@ def main() -> int:
     with open(args.out, "w") as fh:
         fh.write(body)
 
-    print(f"wrote {args.out}: {body.count('    match /') - 1} collections")
+    print(f"wrote {args.out}: {body.count('match /') - 2} collections")
     return 0
 
 
