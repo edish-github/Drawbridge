@@ -383,10 +383,17 @@ def test_an_unreviewed_fourth_party_is_announced_on_the_timeline(review_id, db):
     """The finding is in the table. This is the same fact aimed at a person, before the gate."""
     from agents.evidence.subprocessors import announce_gap
 
-    db.collection("vendors").document("v").set({"name": "DataDynamo Logistics"})
+    # A vendor id unique to the test rather than the bare "v" this used to write. The emulator is
+    # shared with the demo dataset, and a one-character vendor document with no vendor_id field
+    # survived every reseed and rendered in the console's portfolio as a second, empty DataDynamo.
+    # A test that leaves a row behind is a test that shows up in a screenshot.
+    vendor_id = f"fp-{review_id}"
+    db.collection("vendors").document(vendor_id).set(
+        {"vendor_id": vendor_id, "name": "DataDynamo Logistics", "category": "test fixture"}
+    )
     announced = announce_gap(
         review_id,
-        "v",
+        vendor_id,
         [sub(name="Sendline Notifications", purpose="Delivery notifications", jurisdiction="EU")],
     )
 

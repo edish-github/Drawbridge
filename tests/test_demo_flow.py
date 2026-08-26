@@ -118,9 +118,20 @@ def test_the_hero_contradiction_is_present_and_cites_a_chunk(datadynamo_run):
 @emulator_required
 @pubsub_required
 def test_the_expired_certificate_is_a_rule_finding(datadynamo_run):
-    """A date comparison should never be a model's job."""
+    """A date comparison should never be a model's job.
+
+    Selected on the certificate rather than on the word *expired*, which is no longer unique.
+    The fourth-party chain produces its own expiry finding — a subprocessor whose entry on the
+    approved-vendor register has lapsed — and it is a correct finding that happens to sort first.
+    A selector that matched either one was asserting the certificate's domain and severity
+    against whichever finding the id ordering handed it.
+    """
     findings = _findings(_latest_review()["review_id"])
-    cert = next(f for f in findings if "expired" in f["summary"].lower())
+    cert = next(
+        f
+        for f in findings
+        if "expired" in f["summary"].lower() and "certificate" in f["summary"].lower()
+    )
 
     assert cert["source"] == "rule"
     assert cert["domain"] == "compliance_posture"

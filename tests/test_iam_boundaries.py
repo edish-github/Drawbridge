@@ -20,7 +20,7 @@ from __future__ import annotations
 import pytest
 from google.api_core.exceptions import PermissionDenied
 
-from tests.conftest import emulator_required
+from tests.conftest import FIRESTORE_HOST, _reachable, emulator_required
 from tests.support.identity import as_identity, identities, matrix, rows, rules_are_loaded
 
 rules_required = pytest.mark.skipif(
@@ -32,6 +32,11 @@ rules_required = pytest.mark.skipif(
 )
 
 DOC = "iam-probe"
+"""The document id every probe writes to, in every collection it is allowed to write.
+
+One id rather than a unique one per probe, so the sweep below is a single delete per collection
+rather than a set of ids to track.
+"""
 
 
 def write_as(identity: str, collection: str) -> None:
@@ -40,6 +45,34 @@ def write_as(identity: str, collection: str) -> None:
 
 def read_as(identity: str, collection: str) -> None:
     as_identity(identity).collection(collection).document(DOC).get()
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _sweep_probes():
+    """Remove every probe document when the module finishes.
+
+    These tests prove a grant by *performing* the write, so a passing run necessarily leaves a
+    row in roughly twenty collections. They looked like nothing until the operator console
+    started reading those collections and rendered `tasks/iam-probe` as a signal with no vendor
+    and no title — a blank row on a monitoring screen, produced by a test.
+
+    Swept rather than made unique: a probe document with a random id is still a probe document in
+    the ledger, and the console would still draw it.
+    """
+    yield
+
+    if not _reachable(FIRESTORE_HOST):
+        return
+
+    from shared.clients import firestore_client
+
+    db = firestore_client()
+    for _, collection, may_write in rows():
+        if may_write:
+            try:
+                db.collection(collection).document(DOC).delete()
+            except Exception:  # noqa: BLE001 — a sweep that fails must not fail the suite
+                pass
 
 
 # --- Every row in the matrix, both directions ------------------------------------------------
