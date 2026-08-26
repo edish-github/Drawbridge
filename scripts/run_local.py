@@ -20,42 +20,46 @@ import argparse
 import logging
 import sys
 
+from shared import tenancy
 from shared.config import settings
 from shared.events import ALL_TOPICS
 from shared.subscriber import Runner, handlers
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--topics",
-        nargs="*",
-        default=None,
-        help="topics to consume; defaults to every topic with a registered handler",
-    )
-    parser.add_argument(
-        "--max-batches",
-        type=int,
-        default=None,
-        help="stop after this many passes over the subscription list; unset runs until stopped",
-    )
-    parser.add_argument("--log-level", default="INFO")
-    args = parser.parse_args()
+    # Every entry point adopts a tenant before it touches anything. Library code never
+    # defaults one; a CLI does, and only outside cloud mode.
+    with tenancy.acting_for(tenancy.cli_org()):
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument(
+            "--topics",
+            nargs="*",
+            default=None,
+            help="topics to consume; defaults to every topic with a registered handler",
+        )
+        parser.add_argument(
+            "--max-batches",
+            type=int,
+            default=None,
+            help="stop after this many passes over the subscription list; unset runs until stopped",
+        )
+        parser.add_argument("--log-level", default="INFO")
+        args = parser.parse_args()
 
-    logging.basicConfig(
-        level=args.log_level.upper(),
-        format="%(asctime)s %(levelname)-7s %(name)s · %(message)s",
-        datefmt="%H:%M:%S",
-    )
+        logging.basicConfig(
+            level=args.log_level.upper(),
+            format="%(asctime)s %(levelname)-7s %(name)s · %(message)s",
+            datefmt="%H:%M:%S",
+        )
 
-    cfg = settings()
-    registered = sorted(handlers())
-    print(f"[worker] mode={cfg.mode.value}")
-    print(f"[worker] handlers registered for {len(registered)} of {len(ALL_TOPICS)} topics")
-    for topic in registered:
-        print(f"[worker]   {topic}")
+        cfg = settings()
+        registered = sorted(handlers())
+        print(f"[worker] mode={cfg.mode.value}")
+        print(f"[worker] handlers registered for {len(registered)} of {len(ALL_TOPICS)} topics")
+        for topic in registered:
+            print(f"[worker]   {topic}")
 
-    return 0 if Runner(args.topics).run(max_batches=args.max_batches) >= 0 else 1
+        return 0 if Runner(args.topics).run(max_batches=args.max_batches) >= 0 else 1
 
 
 if __name__ == "__main__":

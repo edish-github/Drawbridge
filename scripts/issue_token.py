@@ -40,8 +40,8 @@ import sys
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from shared import tenancy as tenant
 from shared.approvals import COLLECTION_APPROVALS, Approval, token_for
-from shared.clients import firestore_client
 from shared.context import AgentContext
 from shared.domain import ReviewState
 from shared.events import TOPIC_REVIEW_APPROVED, load_review, publish
@@ -81,9 +81,7 @@ def issue(
             f"{f'/{review.gate_scope}' if review.gate_scope else ''}, "
             f"not parked at the {scope!r} gate"
         )
-
-    db = firestore_client()
-    vendor = db.collection("vendors").document(review.vendor_id).get().to_dict() or {}
+    vendor = tenant.collection("vendors").document(review.vendor_id).get().to_dict() or {}
     target = _target_for(scope, review, vendor)
 
     now = datetime.now(UTC)
@@ -97,11 +95,16 @@ def issue(
         expires_at=now + timedelta(minutes=ttl_minutes),
         conditions=list(conditions or []),
     )
-    db.collection(COLLECTION_APPROVALS).document(approval.jti).set(
+    tenant.collection(COLLECTION_APPROVALS).document(approval.jti).set(
         approval.model_dump(mode="json")
     )
 
-    ctx = AgentContext(review_id=review_id, agent="approvals", trace_id=uuid.uuid4().hex)
+    ctx = AgentContext(
+        org_id=tenant.current_org(),
+        review_id=review_id,
+        agent="approvals",
+        trace_id=uuid.uuid4().hex,
+    )
     publish(
         TOPIC_REVIEW_APPROVED,
         review_id,
@@ -132,35 +135,38 @@ def _target_for(scope: str, review, vendor: dict) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--review-id", required=True)
-    parser.add_argument("--scope", default="contact", choices=sorted(GATE_RELEASE))
-    parser.add_argument(
-        "--identity",
-        default="local-operator",
-        help="the named human making the decision; an approval by 'the system' is not one",
-    )
-    parser.add_argument("--ttl-minutes", type=int, default=DEFAULT_TTL_MINUTES)
-    args = parser.parse_args()
-
-    try:
-        token = issue(
-            args.review_id,
-            scope=args.scope,
-            identity=args.identity,
-            ttl_minutes=args.ttl_minutes,
+    # Every entry point adopts a tenant before it touches anything. Library code never
+    # defaults one; a CLI does, and only outside cloud mode.
+    with tenant.acting_for(tenant.cli_org()):
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("--review-id", required=True)
+        parser.add_argument("--scope", default="contact", choices=sorted(GATE_RELEASE))
+        parser.add_argument(
+            "--identity",
+            default="local-operator",
+            help="the named human making the decision; an approval by 'the system' is not one",
         )
-    except GateNotOpen as exc:
-        print(f"refused: {exc}", file=sys.stderr)
-        return 2
+        parser.add_argument("--ttl-minutes", type=int, default=DEFAULT_TTL_MINUTES)
+        args = parser.parse_args()
 
-    print(f"approval issued for {args.review_id} · scope={args.scope} · by {args.identity}")
-    print(f"token {token}")
-    print(
-        f"review.approved published; the Orchestrator will release the gate to "
-        f"{GATE_RELEASE[args.scope].value}"
-    )
-    return 0
+        try:
+            token = issue(
+                args.review_id,
+                scope=args.scope,
+                identity=args.identity,
+                ttl_minutes=args.ttl_minutes,
+            )
+        except GateNotOpen as exc:
+            print(f"refused: {exc}", file=sys.stderr)
+            return 2
+
+        print(f"approval issued for {args.review_id} · scope={args.scope} · by {args.identity}")
+        print(f"token {token}")
+        print(
+            f"review.approved published; the Orchestrator will release the gate to "
+            f"{GATE_RELEASE[args.scope].value}"
+        )
+        return 0
 
 
 if __name__ == "__main__":

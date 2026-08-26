@@ -42,7 +42,7 @@ from scenarios.demo_runner import (
 )
 from scenarios.fixtures import responding_from
 from scenarios.seed import seed_vendor
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 from shared.events import load_review
 
 log = logging.getLogger("drawbridge.second")
@@ -128,7 +128,7 @@ def _open(vendor: str) -> str:
     from shared.domain import Review, ReviewState
     from shared.events import TOPIC_REVIEW_INTAKE, publish
 
-    profile = firestore_client().collection("vendors").document(vendor).get().to_dict() or {}
+    profile = tenant.collection("vendors").document(vendor).get().to_dict() or {}
     review = Review(
         review_id=f"second-{vendor}-{uuid.uuid4().hex[:6]}",
         vendor_id=vendor,
@@ -139,14 +139,19 @@ def _open(vendor: str) -> str:
         tier=int(profile.get("tier", 2)),
         opened_at=datetime.now(UTC) + timedelta(days=30 * MONTHS_LATER),
     )
-    firestore_client().collection("reviews").document(review.review_id).set(
+    tenant.collection("reviews").document(review.review_id).set(
         {**review.model_dump(mode="json"), "opened_reason": "annual renewal"}
     )
     publish(
         TOPIC_REVIEW_INTAKE,
         review.review_id,
         {"vendor_id": vendor, "renewal": True},
-        ctx=AgentContext(review_id=review.review_id, agent="demo", trace_id=uuid.uuid4().hex),
+        ctx=AgentContext(
+            org_id=tenant.current_org(),
+            review_id=review.review_id,
+            agent="demo",
+            trace_id=uuid.uuid4().hex,
+        ),
     )
     return review.review_id
 
@@ -203,8 +208,7 @@ def _notes(vendor_id: str) -> list:
 
     return [
         d.to_dict()
-        for d in firestore_client()
-        .collection("dossiers")
+        for d in tenant.collection("dossiers")
         .where(filter=FieldFilter("vendor_id", "==", vendor_id))
         .stream()
     ]
@@ -217,28 +221,31 @@ def _plan(review_id: str) -> dict:
 
 
 def _asked(review) -> int:
-    raw = firestore_client().collection("reviews").document(review.review_id).get().to_dict()
+    raw = tenant.collection("reviews").document(review.review_id).get().to_dict()
     return len((raw or {}).get("sent_questions", []))
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--vendor", default="datadynamo")
-    parser.add_argument("--log-level", default="WARNING")
-    args = parser.parse_args()
+    # Every entry point adopts a tenant before it touches anything. Library code never
+    # defaults one; a CLI does, and only outside cloud mode.
+    with tenant.acting_for(tenant.cli_org()):
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("--vendor", default="datadynamo")
+        parser.add_argument("--log-level", default="WARNING")
+        args = parser.parse_args()
 
-    logging.basicConfig(
-        level=args.log_level.upper(),
-        format="%(asctime)s %(levelname)-7s %(name)s · %(message)s",
-        datefmt="%H:%M:%S",
-        stream=sys.stdout,
-    )
+        logging.basicConfig(
+            level=args.log_level.upper(),
+            format="%(asctime)s %(levelname)-7s %(name)s · %(message)s",
+            datefmt="%H:%M:%S",
+            stream=sys.stdout,
+        )
 
-    try:
-        return run(args.vendor)
-    except SecondReviewFailed as exc:
-        print(f"\nSECOND REVIEW FAILED · {exc}", file=sys.stderr)
-        return 1
+        try:
+            return run(args.vendor)
+        except SecondReviewFailed as exc:
+            print(f"\nSECOND REVIEW FAILED · {exc}", file=sys.stderr)
+            return 1
 
 
 if __name__ == "__main__":

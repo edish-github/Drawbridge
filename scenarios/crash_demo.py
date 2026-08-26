@@ -36,7 +36,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 
 log = logging.getLogger("drawbridge.crash")
 
@@ -339,7 +339,7 @@ def _status(idem_key: str) -> str:
 
 
 def _review(review_id: str) -> dict:
-    return firestore_client().collection("reviews").document(review_id).get().to_dict() or {}
+    return tenant.collection("reviews").document(review_id).get().to_dict() or {}
 
 
 def _sent(review_id: str) -> int:
@@ -347,8 +347,7 @@ def _sent(review_id: str) -> int:
 
     return len(
         list(
-            firestore_client()
-            .collection("inbox")
+            tenant.collection("inbox")
             .where(filter=FieldFilter("review_id", "==", review_id))
             .where(filter=FieldFilter("kind", "==", "questionnaire"))
             .stream()
@@ -357,32 +356,35 @@ def _sent(review_id: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--vendor", default="datadynamo")
-    parser.add_argument("--child", choices=("open", "replay", "finish"))
-    parser.add_argument("--review-id", default="")
-    parser.add_argument("--fired", default="[]")
-    parser.add_argument("--log-level", default="INFO")
-    args = parser.parse_args()
+    # Every entry point adopts a tenant before it touches anything. Library code never
+    # defaults one; a CLI does, and only outside cloud mode.
+    with tenant.acting_for(tenant.cli_org()):
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("--vendor", default="datadynamo")
+        parser.add_argument("--child", choices=("open", "replay", "finish"))
+        parser.add_argument("--review-id", default="")
+        parser.add_argument("--fired", default="[]")
+        parser.add_argument("--log-level", default="INFO")
+        args = parser.parse_args()
 
-    logging.basicConfig(
-        level=args.log_level.upper(),
-        format="%(asctime)s %(levelname)-7s %(name)s · %(message)s",
-        datefmt="%H:%M:%S",
-        stream=sys.stdout,
-    )
+        logging.basicConfig(
+            level=args.log_level.upper(),
+            format="%(asctime)s %(levelname)-7s %(name)s · %(message)s",
+            datefmt="%H:%M:%S",
+            stream=sys.stdout,
+        )
 
-    try:
-        if args.child == "open":
-            return child_open(args.vendor)
-        if args.child == "replay":
-            return child_replay(args.vendor, args.review_id)
-        if args.child == "finish":
-            return child_finish(args.vendor, args.review_id, json.loads(args.fired))
-        return run(args.vendor)
-    except CrashDemoFailed as exc:
-        print(f"\nCRASH DEMO FAILED · {exc}", file=sys.stderr)
-        return 1
+        try:
+            if args.child == "open":
+                return child_open(args.vendor)
+            if args.child == "replay":
+                return child_replay(args.vendor, args.review_id)
+            if args.child == "finish":
+                return child_finish(args.vendor, args.review_id, json.loads(args.fired))
+            return run(args.vendor)
+        except CrashDemoFailed as exc:
+            print(f"\nCRASH DEMO FAILED · {exc}", file=sys.stderr)
+            return 1
 
 
 if __name__ == "__main__":

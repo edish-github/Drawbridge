@@ -47,6 +47,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from shared import storage
+from shared import tenancy as tenant
 from shared.armor import (
     CRITICAL_FILTERS,
     EXECUTION_SKIPPED,
@@ -57,7 +58,6 @@ from shared.armor import (
     record_screening,
     sign_stamp,
 )
-from shared.clients import firestore_client
 from shared.config import settings
 from shared.context import AgentContext
 from shared.domain import Review, ReviewState
@@ -129,9 +129,8 @@ def seed_vendor(slug: str, *, clock=None) -> str:
     """
     fixture = load_vendor(slug)
     profile = fixture["profile"]
-    db = firestore_client()
 
-    db.collection("vendors").document(profile["vendor_id"]).set(profile)
+    tenant.collection("vendors").document(profile["vendor_id"]).set(profile)
 
     uploaded = 0
     for path in fixture["evidence"]:
@@ -232,9 +231,8 @@ def seed_register() -> int:
     """
     from agents.evidence.subprocessors import COLLECTION_REGISTER, _normalise
 
-    db = firestore_client()
     for entry in APPROVED_VENDOR_REGISTER:
-        db.collection(COLLECTION_REGISTER).document(_normalise(entry["name"])).set(entry)
+        tenant.collection(COLLECTION_REGISTER).document(_normalise(entry["name"])).set(entry)
 
     log.info("seeded the approved-vendor register with %d entries", len(APPROVED_VENDOR_REGISTER))
     return len(APPROVED_VENDOR_REGISTER)
@@ -308,7 +306,7 @@ def seed_reply(review_id: str, body: str, message_id: str) -> str:
     origin_ref = f"reply:{message_id}"
     record_screening(review_id, _seed_stamp(origin_ref))
 
-    ctx = AgentContext(review_id=review_id, agent="seed", trace_id="")
+    ctx = AgentContext(org_id=tenant.current_org(), review_id=review_id, agent="seed", trace_id="")
     publish(
         TOPIC_VENDOR_REPLY_RECEIVED,
         review_id,
@@ -365,7 +363,6 @@ def seed_filler(count: int, *, clock=None) -> list[str]:
     Filler carries no evidence and no findings.
     """
     now = (clock.now() if clock else datetime.now(UTC))
-    db = firestore_client()
     ids: list[str] = []
 
     for i in range(count):
@@ -379,7 +376,7 @@ def seed_filler(count: int, *, clock=None) -> list[str]:
             tier=(i % 3) + 1,
             opened_at=now - timedelta(days=3 + i * 2),
         )
-        db.collection("vendors").document(review.vendor_id).set(
+        tenant.collection("vendors").document(review.vendor_id).set(
             {
                 "vendor_id": review.vendor_id,
                 "name": f"Filler Vendor {i:02d}",
@@ -387,7 +384,7 @@ def seed_filler(count: int, *, clock=None) -> list[str]:
                 "tier": review.tier,
             }
         )
-        db.collection("reviews").document(review_id).set(review.model_dump(mode="json"))
+        tenant.collection("reviews").document(review_id).set(review.model_dump(mode="json"))
         ids.append(review_id)
 
     log.info("seeded %d filler review(s)", len(ids))
@@ -449,10 +446,9 @@ def reset() -> int:
             f"RUNTIME_MODE is {cfg.mode.value}"
         )
 
-    db = firestore_client()
     deleted = 0
     for name in RESETTABLE_COLLECTIONS:
-        for doc in db.collection(name).stream():
+        for doc in tenant.collection(name).stream():
             doc.reference.delete()
             deleted += 1
 
@@ -461,33 +457,36 @@ def reset() -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--vendors", nargs="*", default=list(HERO_VENDORS))
-    parser.add_argument("--filler", type=int, default=FILLER_COUNT)
-    parser.add_argument("--compress", type=int, default=1)
-    parser.add_argument(
-        "--reset",
-        action="store_true",
-        help="clear every review's working state first; local emulator only",
-    )
-    args = parser.parse_args()
+    # Every entry point adopts a tenant before it touches anything. Library code never
+    # defaults one; a CLI does, and only outside cloud mode.
+    with tenant.acting_for(tenant.cli_org()):
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("--vendors", nargs="*", default=list(HERO_VENDORS))
+        parser.add_argument("--filler", type=int, default=FILLER_COUNT)
+        parser.add_argument("--compress", type=int, default=1)
+        parser.add_argument(
+            "--reset",
+            action="store_true",
+            help="clear every review's working state first; local emulator only",
+        )
+        args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="[seed] %(message)s")
+        logging.basicConfig(level=logging.INFO, format="[seed] %(message)s")
 
-    if args.reset:
-        print(f"cleared {reset()} document(s) of prior review state")
+        if args.reset:
+            print(f"cleared {reset()} document(s) of prior review state")
 
-    for slug in args.vendors:
-        seed_vendor(slug)
-    seed_filler(args.filler)
-    entries = seed_register()
+        for slug in args.vendors:
+            seed_vendor(slug)
+        seed_filler(args.filler)
+        entries = seed_register()
 
-    print(
-        f"seeded {len(args.vendors)} vendor(s), {args.filler} filler review(s) and "
-        f"{entries} approved-vendor register entries"
-    )
-    print("evidence is in quarantine; the demo runner seeds clean-bucket fixtures per review")
-    return 0
+        print(
+            f"seeded {len(args.vendors)} vendor(s), {args.filler} filler review(s) and "
+            f"{entries} approved-vendor register entries"
+        )
+        print("evidence is in quarantine; the demo runner seeds clean-bucket fixtures per review")
+        return 0
 
 
 if __name__ == "__main__":

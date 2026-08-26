@@ -21,7 +21,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 from shared.context import AgentContext
 from shared.domain import Review, ReviewState
 from shared.events import TOPIC_REVIEW_INTAKE, publish
@@ -45,9 +45,8 @@ def load_profile(slug: str) -> dict:
 def open_review(slug: str, *, review_id: str | None = None) -> str:
     """Write the vendor and review records and publish ``review.intake``. Returns the id."""
     profile = load_profile(slug)
-    db = firestore_client()
 
-    db.collection("vendors").document(profile["vendor_id"]).set(profile)
+    tenant.collection("vendors").document(profile["vendor_id"]).set(profile)
 
     review = Review(
         review_id=review_id or f"rev-{slug}-{uuid.uuid4().hex[:8]}",
@@ -56,9 +55,14 @@ def open_review(slug: str, *, review_id: str | None = None) -> str:
         tier=int(profile.get("tier", 2)),
         opened_at=datetime.now(UTC),
     )
-    db.collection("reviews").document(review.review_id).set(review.model_dump(mode="json"))
+    tenant.collection("reviews").document(review.review_id).set(review.model_dump(mode="json"))
 
-    ctx = AgentContext(review_id=review.review_id, agent="portal", trace_id=uuid.uuid4().hex)
+    ctx = AgentContext(
+        org_id=tenant.current_org(),
+        review_id=review.review_id,
+        agent="portal",
+        trace_id=uuid.uuid4().hex,
+    )
     publish(
         TOPIC_REVIEW_INTAKE,
         review.review_id,
@@ -71,15 +75,18 @@ def open_review(slug: str, *, review_id: str | None = None) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--vendor", default="nimbuswrite")
-    parser.add_argument("--review-id", default=None)
-    args = parser.parse_args()
+    # Every entry point adopts a tenant before it touches anything. Library code never
+    # defaults one; a CLI does, and only outside cloud mode.
+    with tenant.acting_for(tenant.cli_org()):
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("--vendor", default="nimbuswrite")
+        parser.add_argument("--review-id", default=None)
+        args = parser.parse_args()
 
-    review_id = open_review(args.vendor, review_id=args.review_id)
-    print(f"opened review {review_id} for {args.vendor}")
-    print("the worker will tier it, plan it, and park it at the contact gate")
-    return 0
+        review_id = open_review(args.vendor, review_id=args.review_id)
+        print(f"opened review {review_id} for {args.vendor}")
+        print("the worker will tier it, plan it, and park it at the contact gate")
+        return 0
 
 
 if __name__ == "__main__":

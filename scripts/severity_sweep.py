@@ -44,6 +44,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
+from shared import tenancy as tenant
+
 log = logging.getLogger("drawbridge.sweep")
 
 REPO = Path(__file__).resolve().parent.parent
@@ -158,7 +160,12 @@ def reconcile_once(vendor: str, review_id: str, claim, run: int) -> Attempt:
     from agents.evidence.cross_exam import reconcile_claim
     from shared.context import AgentContext
 
-    ctx = AgentContext(review_id=review_id, agent="evidence", trace_id=f"sweep-{run}")
+    ctx = AgentContext(
+        org_id=tenant.current_org(),
+        review_id=review_id,
+        agent="evidence",
+        trace_id=f"sweep-{run}",
+    )
     try:
         finding = reconcile_claim(ctx, review_id, claim)
     except Exception as exc:  # noqa: BLE001 — one failed call never stops the sweep
@@ -167,11 +174,8 @@ def reconcile_once(vendor: str, review_id: str, claim, run: int) -> Attempt:
 
 
 def _seed_answers(review_id: str, pack: dict) -> None:
-    from shared.clients import firestore_client
-
-    db = firestore_client()
     for question_id, entry in (pack["answers"].get("answers") or {}).items():
-        db.collection("qa_responses").document(f"{review_id}:{question_id}").set(
+        tenant.collection("qa_responses").document(f"{review_id}:{question_id}").set(
             {
                 "review_id": review_id,
                 "question_id": question_id,
@@ -299,38 +303,41 @@ def report(summary: dict, runs: int) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--vendors", nargs="*", default=list(DEFAULT_VENDORS))
-    parser.add_argument("--runs", type=int, default=DEFAULT_RUNS)
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
-    parser.add_argument("--limit", type=int, help="claims per vendor, for a smoke run")
-    parser.add_argument(
-        "--summarise-only",
-        action="store_true",
-        help="rebuild the report from what has already been measured, spending nothing",
-    )
-    args = parser.parse_args()
+    # Every entry point adopts a tenant before it touches anything. Library code never
+    # defaults one; a CLI does, and only outside cloud mode.
+    with tenant.acting_for(tenant.cli_org()):
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("--vendors", nargs="*", default=list(DEFAULT_VENDORS))
+        parser.add_argument("--runs", type=int, default=DEFAULT_RUNS)
+        parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+        parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
+        parser.add_argument("--limit", type=int, help="claims per vendor, for a smoke run")
+        parser.add_argument(
+            "--summarise-only",
+            action="store_true",
+            help="rebuild the report from what has already been measured, spending nothing",
+        )
+        args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="[sweep] %(message)s")
+        logging.basicConfig(level=logging.INFO, format="[sweep] %(message)s")
 
-    attempts = list(load(args.out)) if args.summarise_only else sweep(
-        args.vendors, args.runs, args.out, limit=args.limit
-    )
-    if not attempts:
-        print("nothing measured yet; run without --summarise-only once quota allows")
-        return 1
+        attempts = list(load(args.out)) if args.summarise_only else sweep(
+            args.vendors, args.runs, args.out, limit=args.limit
+        )
+        if not attempts:
+            print("nothing measured yet; run without --summarise-only once quota allows")
+            return 1
 
-    summary = summarise(attempts)
-    args.report.write_text(report(summary, args.runs), encoding="utf-8")
+        summary = summarise(attempts)
+        args.report.write_text(report(summary, args.runs), encoding="utf-8")
 
-    print(
-        f"{summary['stable']}/{summary['measured']} claims stable "
-        f"({summary['rate']:.0%}); {summary['unstable']} drifted, "
-        f"{summary['unmeasured']} unmeasured"
-    )
-    print(f"wrote {args.report}")
-    return 0
+        print(
+            f"{summary['stable']}/{summary['measured']} claims stable "
+            f"({summary['rate']:.0%}); {summary['unstable']} drifted, "
+            f"{summary['unmeasured']} unmeasured"
+        )
+        print(f"wrote {args.report}")
+        return 0
 
 
 if __name__ == "__main__":

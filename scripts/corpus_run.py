@@ -47,6 +47,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from shared import tenancy
+
 log = logging.getLogger("drawbridge.corpus")
 
 REPO = Path(__file__).resolve().parent.parent
@@ -370,27 +372,30 @@ def render(summary: dict) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--variant", type=int, help="run one variant by number")
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
-    parser.add_argument("--summarise-only", action="store_true", help="re-render the last run")
-    args = parser.parse_args()
+    # Every entry point adopts a tenant before it touches anything. Library code never
+    # defaults one; a CLI does, and only outside cloud mode.
+    with tenancy.acting_for(tenancy.cli_org()):
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("--variant", type=int, help="run one variant by number")
+        parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+        parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
+        parser.add_argument("--summarise-only", action="store_true", help="re-render the last run")
+        args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="[corpus] %(message)s")
+        logging.basicConfig(level=logging.INFO, format="[corpus] %(message)s")
 
-    if args.summarise_only:
-        summary = json.loads(args.json.read_text(encoding="utf-8"))
-    else:
-        outcomes, flagged = run(args.variant)
-        summary = summarise(outcomes, flagged)
-        args.json.parent.mkdir(parents=True, exist_ok=True)
-        args.json.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+        if args.summarise_only:
+            summary = json.loads(args.json.read_text(encoding="utf-8"))
+        else:
+            outcomes, flagged = run(args.variant)
+            summary = summarise(outcomes, flagged)
+            args.json.parent.mkdir(parents=True, exist_ok=True)
+            args.json.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
 
-    args.out.write_text(render(summary), encoding="utf-8")
-    print(render(summary))
-    print(f"wrote {args.out}")
-    return 0
+        args.out.write_text(render(summary), encoding="utf-8")
+        print(render(summary))
+        print(f"wrote {args.out}")
+        return 0
 
 
 if __name__ == "__main__":

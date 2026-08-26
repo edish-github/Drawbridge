@@ -34,7 +34,7 @@ from scenarios.seed import (
     seed_reply,
     seed_vendor,
 )
-from shared.clients import firestore_client
+from shared import tenancy as tenant
 from shared.context import AgentContext
 from shared.domain import Review, ReviewState
 from shared.events import TOPIC_EVIDENCE_SCREENED, TOPIC_REVIEW_INTAKE, load_review, publish
@@ -146,7 +146,12 @@ class Demo:
         return loaded
 
     def ctx(self) -> AgentContext:
-        return AgentContext(review_id=self.review_id, agent="demo", trace_id=uuid.uuid4().hex)
+        return AgentContext(
+            org_id=tenant.current_org(),
+            review_id=self.review_id,
+            agent="demo",
+            trace_id=uuid.uuid4().hex,
+        )
 
     def adopt(self, review_id: str, fired: list[str]) -> None:
         """Continue a review a previous process opened.
@@ -368,6 +373,7 @@ def sweep(demo: Demo) -> None:
 
     review = demo.review()
     event = EventEnvelope(
+        org_id=tenant.current_org(),
         type=TOPIC_WATCHDOG_SWEEP,
         review_id=demo.review_id,
         idem_key=f"{demo.review_id}:plan_v{review.plan_version}:watchdog_sweep:v1",
@@ -405,12 +411,10 @@ def forget_prior_runs(vendor: str) -> None:
     a path that forgets.
     """
     from google.cloud.firestore_v1 import FieldFilter
-
-    db = firestore_client()
     cleared = 0
     for collection, field in (("dossiers", "vendor_id"), ("tasks", "vendor_id")):
         for doc in (
-            db.collection(collection).where(filter=FieldFilter(field, "==", vendor)).stream()
+            tenant.collection(collection).where(filter=FieldFilter(field, "==", vendor)).stream()
         ):
             doc.reference.delete()
             cleared += 1
@@ -428,21 +432,26 @@ def open_review(profile: dict) -> str:
         tier=int(profile.get("tier", 2)),
         opened_at=datetime.now(UTC),
     )
-    firestore_client().collection("reviews").document(review.review_id).set(
+    tenant.collection("reviews").document(review.review_id).set(
         review.model_dump(mode="json")
     )
     publish(
         TOPIC_REVIEW_INTAKE,
         review.review_id,
         {"vendor_id": profile["vendor_id"]},
-        ctx=AgentContext(review_id=review.review_id, agent="demo", trace_id=uuid.uuid4().hex),
+        ctx=AgentContext(
+            org_id=tenant.current_org(),
+            review_id=review.review_id,
+            agent="demo",
+            trace_id=uuid.uuid4().hex,
+        ),
     )
     return review.review_id
 
 
 def mark_replies_complete(review_id: str) -> None:
     """Stand in for an analyst declaring the reply thread finished."""
-    firestore_client().collection("reviews").document(review_id).set(
+    tenant.collection("reviews").document(review_id).set(
         {"replies_complete": True}, merge=True
     )
 
@@ -470,8 +479,7 @@ def inbox_count(review_id: str, kind: str | None = None) -> int:
     from google.cloud.firestore_v1 import FieldFilter
 
     query = (
-        firestore_client()
-        .collection("inbox")
+        tenant.collection("inbox")
         .where(filter=FieldFilter("review_id", "==", review_id))
     )
     if kind is not None:
@@ -490,8 +498,7 @@ def gap_cards(review_id: str) -> list[dict]:
     from shared.state import COLLECTION_DASHBOARD
 
     docs = (
-        firestore_client()
-        .collection(COLLECTION_DASHBOARD)
+        tenant.collection(COLLECTION_DASHBOARD)
         .where(filter=FieldFilter("review_id", "==", review_id))
         .where(filter=FieldFilter("kind", "==", "fourth_party_gap"))
         .stream()
@@ -508,7 +515,7 @@ def _count(collection: str, review_id: str) -> int:
 
     return len(
         list(
-            firestore_client()
+            tenant
             .collection(collection)
             .where(filter=FieldFilter("review_id", "==", review_id))
             .stream()
@@ -517,29 +524,32 @@ def _count(collection: str, review_id: str) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--vendor", default="datadynamo")
-    parser.add_argument("--compress", type=int, default=1)
-    parser.add_argument("--fixtures-only", action="store_true")
-    parser.add_argument("--log-level", default="INFO")
-    args = parser.parse_args()
+    # Every entry point adopts a tenant before it touches anything. Library code never
+    # defaults one; a CLI does, and only outside cloud mode.
+    with tenant.acting_for(tenant.cli_org()):
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("--vendor", default="datadynamo")
+        parser.add_argument("--compress", type=int, default=1)
+        parser.add_argument("--fixtures-only", action="store_true")
+        parser.add_argument("--log-level", default="INFO")
+        args = parser.parse_args()
 
-    logging.basicConfig(
-        level=args.log_level.upper(),
-        format="%(asctime)s %(levelname)-7s %(name)s · %(message)s",
-        datefmt="%H:%M:%S",
-    )
+        logging.basicConfig(
+            level=args.log_level.upper(),
+            format="%(asctime)s %(levelname)-7s %(name)s · %(message)s",
+            datefmt="%H:%M:%S",
+        )
 
-    try:
-        fired = run(args.vendor, compress=args.compress, fixtures_only=args.fixtures_only)
-    except BeatMissing as exc:
-        print(f"\nDEMO FAILED · {exc}", file=sys.stderr)
-        return 1
+        try:
+            fired = run(args.vendor, compress=args.compress, fixtures_only=args.fixtures_only)
+        except BeatMissing as exc:
+            print(f"\nDEMO FAILED · {exc}", file=sys.stderr)
+            return 1
 
-    print(f"\nall {len(fired)} beats fired for {args.vendor}:")
-    for beat in fired:
-        print(f"  {beat}")
-    return 0
+        print(f"\nall {len(fired)} beats fired for {args.vendor}:")
+        for beat in fired:
+            print(f"  {beat}")
+        return 0
 
 
 if __name__ == "__main__":

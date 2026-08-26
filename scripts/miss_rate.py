@@ -56,6 +56,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
+from shared import tenancy
+
 log = logging.getLogger("drawbridge.miss_rate")
 
 REPO = Path(__file__).resolve().parent.parent
@@ -185,7 +187,12 @@ def reconcile_once(review_id: str, case: dict, run: int) -> Outcome:
     from agents.evidence.cross_exam import Claim, reconcile_claim, retrieve_for_claim
     from shared.context import AgentContext
 
-    ctx = AgentContext(review_id=review_id, agent="evidence", trace_id=f"missrate-{run}")
+    ctx = AgentContext(
+        org_id=tenancy.current_org(),
+        review_id=review_id,
+        agent="evidence",
+        trace_id=f"missrate-{run}",
+    )
     claim = Claim(question_id=case["id"], domain=case["domain"], text=case["claim"])
 
     try:
@@ -343,32 +350,35 @@ def report(summary: dict) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--runs", type=int, default=DEFAULT_RUNS)
-    parser.add_argument("--case", help="run one case by id")
-    parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
-    parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
-    parser.add_argument(
-        "--summarise-only",
-        action="store_true",
-        help="report what is already recorded and spend nothing",
-    )
-    args = parser.parse_args()
+    # Every entry point adopts a tenant before it touches anything. Library code never
+    # defaults one; a CLI does, and only outside cloud mode.
+    with tenancy.acting_for(tenancy.cli_org()):
+        parser = argparse.ArgumentParser(description=__doc__)
+        parser.add_argument("--runs", type=int, default=DEFAULT_RUNS)
+        parser.add_argument("--case", help="run one case by id")
+        parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+        parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
+        parser.add_argument(
+            "--summarise-only",
+            action="store_true",
+            help="report what is already recorded and spend nothing",
+        )
+        args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="[miss-rate] %(message)s")
+        logging.basicConfig(level=logging.INFO, format="[miss-rate] %(message)s")
 
-    outcomes = (
-        list(load(args.out))
-        if args.summarise_only
-        else measure(args.runs, args.out, only=args.case)
-    )
-    summary = summarise(outcomes)
+        outcomes = (
+            list(load(args.out))
+            if args.summarise_only
+            else measure(args.runs, args.out, only=args.case)
+        )
+        summary = summarise(outcomes)
 
-    args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(report(summary), encoding="utf-8")
-    print(report(summary))
-    print(f"wrote {args.report}")
-    return 0
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(report(summary), encoding="utf-8")
+        print(report(summary))
+        print(f"wrote {args.report}")
+        return 0
 
 
 if __name__ == "__main__":
