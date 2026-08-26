@@ -1,0 +1,1986 @@
+{
+  "nodes": [
+    {
+      "id": "intake",
+      "kind": "event",
+      "label": "Intake",
+      "identity": "operator",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [],
+      "emits": [
+        "review.intake"
+      ],
+      "arrives_in": [
+        "intake"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "event:review.intake"
+      ],
+      "note": "Opened by a person through scripts/open_review.py, or by the Watchdog on a signal. Identity 'operator' rather than a service account, and that is a finding rather than a shorthand: no identity in the permission matrix can write the reviews collection except the Orchestrator and the Questionnaire agent, so there is today no service account that could open a review from a hosted intake form. The dashboard deliberately holds no write path and must not acquire one for this.",
+      "contract": {
+        "inputs": [
+          "vendor record",
+          "intake form"
+        ],
+        "outputs": [
+          "review.intake"
+        ],
+        "reads": [
+          "vendors"
+        ],
+        "writes": [
+          "reviews",
+          "events"
+        ],
+        "forbidden": [
+          "any model call"
+        ],
+        "model": null
+      },
+      "failure": null
+    },
+    {
+      "id": "recall",
+      "kind": "deterministic",
+      "label": "Recall dossier",
+      "identity": "sa-orchestrator",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [
+        "review.intake"
+      ],
+      "emits": [],
+      "arrives_in": [
+        "intake"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "decision:recall",
+        "card:prior_review_recalled"
+      ],
+      "note": "A vendor nobody has reviewed before recalls nothing, which is not a failure.",
+      "contract": {
+        "inputs": [
+          "vendor_id"
+        ],
+        "outputs": [
+          "dossier",
+          "carried questions"
+        ],
+        "reads": [
+          "dossiers",
+          "reviews"
+        ],
+        "writes": [
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "any write to dossiers"
+        ],
+        "model": null
+      },
+      "failure": {
+        "max_attempts": 1,
+        "on_exhaustion": "degrade",
+        "park_reason": "",
+        "degraded_to": "no dossier"
+      }
+    },
+    {
+      "id": "tier_router",
+      "kind": "router",
+      "label": "Tier router",
+      "identity": "sa-orchestrator",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [
+        "review.intake"
+      ],
+      "emits": [],
+      "arrives_in": [
+        "intake"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "decision:tier_router",
+        "field:tier"
+      ],
+      "note": "Arithmetic sets a floor; the model may raise scrutiny and never lower it.",
+      "contract": {
+        "inputs": [
+          "declared intake facts",
+          "dossier"
+        ],
+        "outputs": [
+          "tier"
+        ],
+        "reads": [
+          "vendors",
+          "dossiers"
+        ],
+        "writes": [
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "lowering a tier"
+        ],
+        "model": null
+      },
+      "failure": null
+    },
+    {
+      "id": "plan",
+      "kind": "agent",
+      "label": "Plan review",
+      "identity": "sa-orchestrator",
+      "checkpoint": "plan",
+      "plan_step": null,
+      "triggered_by": [
+        "review.intake"
+      ],
+      "emits": [
+        "review.plan_ready"
+      ],
+      "arrives_in": [
+        "intake"
+      ],
+      "advances_to": "questionnaire_out",
+      "observed_by": [
+        "step:plan",
+        "event:review.plan_ready"
+      ],
+      "note": "Step names come from a closed vocabulary; work with no name parks.",
+      "contract": {
+        "inputs": [
+          "vendor",
+          "dossier",
+          "tier floor"
+        ],
+        "outputs": [
+          "plan",
+          "domains",
+          "carried questions"
+        ],
+        "reads": [
+          "vendors",
+          "dossiers",
+          "reviews"
+        ],
+        "writes": [
+          "reviews",
+          "idempotency",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "email",
+          "any Storage role",
+          "approvals write"
+        ],
+        "model": "fast"
+      },
+      "failure": {
+        "max_attempts": 5,
+        "on_exhaustion": "park",
+        "park_reason": "planning_failed",
+        "degraded_to": null
+      }
+    },
+    {
+      "id": "contact_gate",
+      "kind": "gate",
+      "label": "G2 \u00b7 first outbound contact",
+      "identity": "sa-questionnaire",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [
+        "review.plan_ready"
+      ],
+      "emits": [
+        "review.approved"
+      ],
+      "arrives_in": [
+        "questionnaire_out"
+      ],
+      "advances_to": "gated",
+      "observed_by": [
+        "state:gated/contact",
+        "card:gate/contact"
+      ],
+      "note": "Policy P1 at the gateway is what makes this unskippable.",
+      "contract": {
+        "inputs": [
+          "plan",
+          "vendor contact"
+        ],
+        "outputs": [
+          "approval token"
+        ],
+        "reads": [
+          "approvals",
+          "approval_tokens_spent",
+          "reviews"
+        ],
+        "writes": [
+          "reviews",
+          "approval_tokens_spent",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "approvals write",
+          "signing an approval"
+        ],
+        "model": null
+      },
+      "failure": {
+        "max_attempts": 1,
+        "on_exhaustion": "park",
+        "park_reason": "contact_gate",
+        "degraded_to": null
+      }
+    },
+    {
+      "id": "questionnaire_send",
+      "kind": "agent",
+      "label": "Generate and send",
+      "identity": "sa-questionnaire",
+      "checkpoint": "questionnaire_send",
+      "plan_step": "questionnaire_send",
+      "triggered_by": [
+        "review.plan_ready"
+      ],
+      "emits": [],
+      "arrives_in": [
+        "questionnaire_out"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "step:questionnaire_send",
+        "field:sent_questions"
+      ],
+      "note": "A re-plan rekeys this step so added questions send and asked ones cannot resend.",
+      "contract": {
+        "inputs": [
+          "plan",
+          "question bank",
+          "approval token"
+        ],
+        "outputs": [
+          "sent questions",
+          "outbound email"
+        ],
+        "reads": [
+          "reviews",
+          "vendors",
+          "qa_responses",
+          "approvals"
+        ],
+        "writes": [
+          "reviews",
+          "qa_responses",
+          "inbox",
+          "idempotency",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "findings write",
+          "scores write",
+          "any Storage read"
+        ],
+        "model": "fast"
+      },
+      "failure": {
+        "max_attempts": 5,
+        "on_exhaustion": "park",
+        "park_reason": "send_failed",
+        "degraded_to": null
+      }
+    },
+    {
+      "id": "reply",
+      "kind": "event",
+      "label": "Vendor replies",
+      "identity": "sa-portal",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [],
+      "emits": [
+        "vendor.reply_received"
+      ],
+      "arrives_in": [
+        "questionnaire_out",
+        "replies_in"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "event:vendor.reply_received"
+      ],
+      "note": "The other half of the vendor boundary. Declared as its own node for the same reason 'upload' is: the fleet does not schedule it, and a graph that showed replies as something the Questionnaire agent produced would be drawing a fleet that talks to itself.",
+      "contract": {
+        "inputs": [
+          "vendor message"
+        ],
+        "outputs": [
+          "vendor.reply_received"
+        ],
+        "reads": [
+          "reviews",
+          "qa_responses"
+        ],
+        "writes": [
+          "qa_responses",
+          "events"
+        ],
+        "forbidden": [
+          "findings write",
+          "scores write",
+          "any model call"
+        ],
+        "model": null
+      },
+      "failure": null
+    },
+    {
+      "id": "reply_parse",
+      "kind": "agent",
+      "label": "Parse reply",
+      "identity": "sa-questionnaire",
+      "checkpoint": null,
+      "plan_step": "followup",
+      "triggered_by": [
+        "vendor.reply_received"
+      ],
+      "emits": [],
+      "arrives_in": [
+        "questionnaire_out",
+        "replies_in"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "event:vendor.reply_received",
+        "decision:reply_parse"
+      ],
+      "note": "",
+      "contract": {
+        "inputs": [
+          "vendor.reply_received",
+          "clean stamp"
+        ],
+        "outputs": [
+          "answers",
+          "coverage"
+        ],
+        "reads": [
+          "reviews",
+          "qa_responses",
+          "inbox"
+        ],
+        "writes": [
+          "qa_responses",
+          "qa_responses_superseded",
+          "inbox",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "findings write",
+          "scores write"
+        ],
+        "model": "fast"
+      },
+      "failure": {
+        "max_attempts": 5,
+        "on_exhaustion": "park",
+        "park_reason": "reply_unparseable",
+        "degraded_to": null
+      }
+    },
+    {
+      "id": "followup",
+      "kind": "agent",
+      "label": "Re-ask an unusable answer",
+      "identity": "sa-questionnaire",
+      "checkpoint": null,
+      "plan_step": "followup",
+      "triggered_by": [
+        "vendor.reply_received"
+      ],
+      "emits": [],
+      "arrives_in": [
+        "questionnaire_out",
+        "replies_in"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "decision:followup",
+        "collection:followups"
+      ],
+      "note": "Once each. An answer re-asked twice is a chase with extra steps.",
+      "contract": {
+        "inputs": [
+          "answers rated unusable"
+        ],
+        "outputs": [
+          "follow-up questions"
+        ],
+        "reads": [
+          "qa_responses",
+          "followups"
+        ],
+        "writes": [
+          "followups",
+          "qa_responses",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "findings write"
+        ],
+        "model": "fast"
+      },
+      "failure": {
+        "max_attempts": 1,
+        "on_exhaustion": "skip",
+        "park_reason": "",
+        "degraded_to": null
+      }
+    },
+    {
+      "id": "chase",
+      "kind": "agent",
+      "label": "Chase",
+      "identity": "sa-questionnaire",
+      "checkpoint": null,
+      "plan_step": "chase",
+      "triggered_by": [
+        "review.chase_due"
+      ],
+      "emits": [],
+      "arrives_in": [
+        "questionnaire_out",
+        "replies_in"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "event:review.chase_due",
+        "decision:chase"
+      ],
+      "note": "Three rounds, then a person owns it. A fourth reminder is a loop.",
+      "contract": {
+        "inputs": [
+          "outstanding questions",
+          "chase round"
+        ],
+        "outputs": [
+          "outbound email"
+        ],
+        "reads": [
+          "reviews",
+          "qa_responses",
+          "inbox"
+        ],
+        "writes": [
+          "inbox",
+          "reviews",
+          "idempotency",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "findings write",
+          "scores write"
+        ],
+        "model": "fast"
+      },
+      "failure": {
+        "max_attempts": 3,
+        "on_exhaustion": "park",
+        "park_reason": "no_reply",
+        "degraded_to": null
+      }
+    },
+    {
+      "id": "retier_router",
+      "kind": "router",
+      "label": "Re-tier router",
+      "identity": "sa-orchestrator",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [
+        "vendor.reply_received"
+      ],
+      "emits": [
+        "review.plan_ready"
+      ],
+      "arrives_in": [
+        "replies_in"
+      ],
+      "advances_to": "questionnaire_out",
+      "observed_by": [
+        "decision:retier_router",
+        "card:tier_change"
+      ],
+      "note": "The one legitimate backward move inside a review, and it only ever tightens.",
+      "contract": {
+        "inputs": [
+          "classified answers",
+          "current tier"
+        ],
+        "outputs": [
+          "tier",
+          "plan version"
+        ],
+        "reads": [
+          "qa_responses",
+          "data_scope_classifications",
+          "reviews"
+        ],
+        "writes": [
+          "reviews",
+          "data_scope_classifications",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "lowering a tier"
+        ],
+        "model": "fast"
+      },
+      "failure": null
+    },
+    {
+      "id": "coverage_join",
+      "kind": "join",
+      "label": "Coverage join",
+      "identity": "sa-orchestrator",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [
+        "vendor.reply_received"
+      ],
+      "emits": [],
+      "arrives_in": [
+        "replies_in"
+      ],
+      "advances_to": "evidence_review",
+      "observed_by": [
+        "decision:coverage_join",
+        "state:evidence_review"
+      ],
+      "note": "Measured against the current plan, never against one a re-tier replaced.",
+      "contract": {
+        "inputs": [
+          "answered proportion",
+          "analyst override"
+        ],
+        "outputs": [
+          "open evidence review"
+        ],
+        "reads": [
+          "qa_responses",
+          "reviews",
+          "screenings"
+        ],
+        "writes": [
+          "reviews",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "findings write"
+        ],
+        "model": null
+      },
+      "failure": null
+    },
+    {
+      "id": "upload",
+      "kind": "event",
+      "label": "Vendor uploads evidence",
+      "identity": "sa-portal",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [],
+      "emits": [
+        "vendor.evidence_uploaded"
+      ],
+      "arrives_in": [
+        "evidence_review",
+        "questionnaire_out",
+        "replies_in"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "event:vendor.evidence_uploaded"
+      ],
+      "note": "Writes to quarantine and cannot read it back.",
+      "contract": {
+        "inputs": [
+          "vendor bytes"
+        ],
+        "outputs": [
+          "vendor.evidence_uploaded"
+        ],
+        "reads": [
+          "reviews"
+        ],
+        "writes": [
+          "events"
+        ],
+        "forbidden": [
+          "quarantine read",
+          "any model call"
+        ],
+        "model": null
+      },
+      "failure": null
+    },
+    {
+      "id": "screening",
+      "kind": "deterministic",
+      "label": "Screen and promote",
+      "identity": "sa-armor",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [
+        "vendor.evidence_uploaded"
+      ],
+      "emits": [
+        "evidence.screened",
+        "review.rescore"
+      ],
+      "arrives_in": [
+        "evidence_review",
+        "questionnaire_out",
+        "replies_in"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "event:evidence.screened",
+        "collection:screenings"
+      ],
+      "note": "Fails closed. A skipped detector is not a detector that found nothing.",
+      "contract": {
+        "inputs": [
+          "quarantined object"
+        ],
+        "outputs": [
+          "clean object",
+          "clean stamp",
+          "verdict"
+        ],
+        "reads": [
+          "reviews",
+          "screenings",
+          "inert_excerpts"
+        ],
+        "writes": [
+          "screenings",
+          "inert_excerpts",
+          "events"
+        ],
+        "forbidden": [
+          "any generative model call",
+          "email",
+          "findings write"
+        ],
+        "model": null
+      },
+      "failure": {
+        "max_attempts": 5,
+        "on_exhaustion": "park",
+        "park_reason": "screening_unavailable",
+        "degraded_to": null
+      }
+    },
+    {
+      "id": "index",
+      "kind": "deterministic",
+      "label": "Chunk and embed",
+      "identity": "sa-evidence",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [
+        "evidence.screened"
+      ],
+      "emits": [],
+      "arrives_in": [
+        "evidence_review",
+        "replies_in"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "collection:evidence_chunks"
+      ],
+      "note": "An embedding call, which is why it is the Evidence agent's and not screening's.",
+      "contract": {
+        "inputs": [
+          "clean object"
+        ],
+        "outputs": [
+          "evidence chunks"
+        ],
+        "reads": [
+          "reviews"
+        ],
+        "writes": [
+          "evidence_chunks",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "the quarantine bucket",
+          "any egress"
+        ],
+        "model": "fast"
+      },
+      "failure": {
+        "max_attempts": 5,
+        "on_exhaustion": "degrade",
+        "park_reason": "",
+        "degraded_to": "whole-document reconciliation"
+      }
+    },
+    {
+      "id": "extract",
+      "kind": "agent",
+      "label": "Extract document facts",
+      "identity": "sa-evidence",
+      "checkpoint": null,
+      "plan_step": "evidence_extract",
+      "triggered_by": [
+        "evidence.screened"
+      ],
+      "emits": [],
+      "arrives_in": [
+        "evidence_review",
+        "replies_in"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "decision:extract",
+        "step:evidence_review"
+      ],
+      "note": "An unreadable document becomes a finding rather than a missing one.",
+      "contract": {
+        "inputs": [
+          "clean object",
+          "clean stamp"
+        ],
+        "outputs": [
+          "dated fields",
+          "named entities"
+        ],
+        "reads": [
+          "reviews",
+          "vendors"
+        ],
+        "writes": [
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "email",
+          "any egress",
+          "scores write"
+        ],
+        "model": "fast"
+      },
+      "failure": {
+        "max_attempts": 5,
+        "on_exhaustion": "degrade",
+        "park_reason": "",
+        "degraded_to": "unreadable-document finding"
+      }
+    },
+    {
+      "id": "checks",
+      "kind": "deterministic",
+      "label": "Deterministic checks",
+      "identity": "sa-evidence",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [],
+      "emits": [],
+      "arrives_in": [
+        "evidence_review"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "finding_source:rule"
+      ],
+      "note": "Runs before the model passes, so 'already derived, do not re-derive' is a fact.",
+      "contract": {
+        "inputs": [
+          "extracted dated fields",
+          "today"
+        ],
+        "outputs": [
+          "rule findings"
+        ],
+        "reads": [
+          "vendors"
+        ],
+        "writes": [
+          "findings",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "any model call"
+        ],
+        "model": null
+      },
+      "failure": null
+    },
+    {
+      "id": "cross_exam",
+      "kind": "agent",
+      "label": "Cross-examine claims",
+      "identity": "sa-evidence",
+      "checkpoint": null,
+      "plan_step": "cross_examine",
+      "triggered_by": [],
+      "emits": [],
+      "arrives_in": [
+        "evidence_review"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "decision:cross_exam",
+        "finding_source:model"
+      ],
+      "note": "One of exactly two deep-model destinations in the fleet.",
+      "contract": {
+        "inputs": [
+          "questionnaire claims",
+          "retrieved passages"
+        ],
+        "outputs": [
+          "findings",
+          "contradictions"
+        ],
+        "reads": [
+          "qa_responses",
+          "evidence_chunks"
+        ],
+        "writes": [
+          "findings",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "email",
+          "any egress",
+          "scores write"
+        ],
+        "model": "deep"
+      },
+      "failure": {
+        "max_attempts": 5,
+        "on_exhaustion": "park",
+        "park_reason": "cross_exam_failed",
+        "degraded_to": null
+      }
+    },
+    {
+      "id": "subprocessors",
+      "kind": "agent",
+      "label": "Diff the fourth-party chain",
+      "identity": "sa-evidence",
+      "checkpoint": null,
+      "plan_step": "subprocessor_extract",
+      "triggered_by": [],
+      "emits": [],
+      "arrives_in": [
+        "evidence_review"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "vendor_collection:subprocessors"
+      ],
+      "note": "A model reads five fields; a set difference decides what they mean.",
+      "contract": {
+        "inputs": [
+          "clean object",
+          "approved-vendor register"
+        ],
+        "outputs": [
+          "subprocessors",
+          "rule findings"
+        ],
+        "reads": [
+          "approved_vendors",
+          "subprocessors"
+        ],
+        "writes": [
+          "subprocessors",
+          "findings",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "approved_vendors write"
+        ],
+        "model": "fast"
+      },
+      "failure": {
+        "max_attempts": 5,
+        "on_exhaustion": "degrade",
+        "park_reason": "",
+        "degraded_to": "no chain extracted"
+      }
+    },
+    {
+      "id": "findings_join",
+      "kind": "join",
+      "label": "Findings join",
+      "identity": "sa-evidence",
+      "checkpoint": "evidence_review",
+      "plan_step": null,
+      "triggered_by": [],
+      "emits": [
+        "review.findings_ready"
+      ],
+      "arrives_in": [
+        "evidence_review"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "step:evidence_review",
+        "event:review.findings_ready"
+      ],
+      "note": "All three arms required. A partial finding set scored as complete is the failure this design exists to prevent.",
+      "contract": {
+        "inputs": [
+          "rule findings",
+          "cross-exam findings",
+          "chain findings"
+        ],
+        "outputs": [
+          "review.findings_ready"
+        ],
+        "reads": [
+          "findings"
+        ],
+        "writes": [
+          "findings",
+          "idempotency",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "scores write"
+        ],
+        "model": null
+      },
+      "failure": {
+        "max_attempts": 5,
+        "on_exhaustion": "park",
+        "park_reason": "evidence_incomplete",
+        "degraded_to": null
+      }
+    },
+    {
+      "id": "score",
+      "kind": "deterministic",
+      "label": "Trust Score",
+      "identity": "sa-scorer",
+      "checkpoint": "score",
+      "plan_step": "score",
+      "triggered_by": [
+        "review.findings_ready",
+        "review.rescore"
+      ],
+      "emits": [],
+      "arrives_in": [
+        "evidence_review",
+        "scored"
+      ],
+      "advances_to": "scored",
+      "observed_by": [
+        "step:score",
+        "collection:scores"
+      ],
+      "note": "Asserted by import graph to have no path to shared.routing.",
+      "contract": {
+        "inputs": [
+          "findings",
+          "rubric",
+          "plan domains"
+        ],
+        "outputs": [
+          "score",
+          "band",
+          "breakdown"
+        ],
+        "reads": [
+          "findings",
+          "reviews",
+          "screenings"
+        ],
+        "writes": [
+          "scores",
+          "idempotency",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "any model call",
+          "external calls",
+          "approvals write"
+        ],
+        "model": null
+      },
+      "failure": {
+        "max_attempts": 5,
+        "on_exhaustion": "park",
+        "park_reason": "scoring_failed",
+        "degraded_to": null
+      }
+    },
+    {
+      "id": "memo",
+      "kind": "agent",
+      "label": "Risk memo",
+      "identity": "sa-scorer",
+      "checkpoint": "memo",
+      "plan_step": "memo",
+      "triggered_by": [],
+      "emits": [
+        "review.score_ready"
+      ],
+      "arrives_in": [
+        "evidence_review",
+        "scored"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "step:memo",
+        "event:review.score_ready"
+      ],
+      "note": "Given a band rather than deciding one. The only destination sanitised content is inadmissible to.",
+      "contract": {
+        "inputs": [
+          "findings",
+          "score",
+          "dossier"
+        ],
+        "outputs": [
+          "memo",
+          "review.score_ready"
+        ],
+        "reads": [
+          "findings",
+          "scores",
+          "vendors",
+          "dossiers"
+        ],
+        "writes": [
+          "memos",
+          "findings",
+          "dossiers",
+          "idempotency",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "sanitised content",
+          "external calls"
+        ],
+        "model": "deep"
+      },
+      "failure": {
+        "max_attempts": 5,
+        "on_exhaustion": "park",
+        "park_reason": "memo_failed",
+        "degraded_to": null
+      }
+    },
+    {
+      "id": "decision_gate",
+      "kind": "gate",
+      "label": "G1 \u00b7 risk acceptance",
+      "identity": "sa-orchestrator",
+      "checkpoint": null,
+      "plan_step": "gate_decision",
+      "triggered_by": [
+        "review.score_ready"
+      ],
+      "emits": [
+        "review.approved"
+      ],
+      "arrives_in": [
+        "scored"
+      ],
+      "advances_to": "gated",
+      "observed_by": [
+        "state:gated/decision",
+        "card:gate/decision"
+      ],
+      "note": "A named human accepts the risk. The token is scoped and cannot be spent at G2.",
+      "contract": {
+        "inputs": [
+          "score",
+          "band",
+          "memo"
+        ],
+        "outputs": [
+          "approval token",
+          "named identity"
+        ],
+        "reads": [
+          "scores",
+          "memos"
+        ],
+        "writes": [
+          "reviews",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "approvals write",
+          "signing an approval"
+        ],
+        "model": null
+      },
+      "failure": {
+        "max_attempts": 1,
+        "on_exhaustion": "park",
+        "park_reason": "gate_unresolved",
+        "degraded_to": null
+      }
+    },
+    {
+      "id": "decide",
+      "kind": "deterministic",
+      "label": "Record the decision",
+      "identity": "sa-orchestrator",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [
+        "review.approved"
+      ],
+      "emits": [],
+      "arrives_in": [
+        "gated"
+      ],
+      "advances_to": "decided",
+      "observed_by": [
+        "state:decided"
+      ],
+      "note": "What this review leaves for the next one is written after the transition, not before: a decision a person made must not block on a store for a review that has not started.",
+      "contract": {
+        "inputs": [
+          "approval token",
+          "identity"
+        ],
+        "outputs": [
+          "decided review",
+          "dossier note"
+        ],
+        "reads": [
+          "reviews",
+          "scores"
+        ],
+        "writes": [
+          "reviews",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "approvals write"
+        ],
+        "model": null
+      },
+      "failure": {
+        "max_attempts": 5,
+        "on_exhaustion": "park",
+        "park_reason": "decision_write_failed",
+        "degraded_to": null
+      }
+    },
+    {
+      "id": "monitor",
+      "kind": "terminal",
+      "label": "Monitored portfolio",
+      "identity": "sa-watchdog",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [
+        "watchdog.sweep"
+      ],
+      "emits": [],
+      "arrives_in": [
+        "monitored"
+      ],
+      "advances_to": "monitored",
+      "observed_by": [
+        "state:monitored"
+      ],
+      "note": "Not terminal in the immutable sense \u2014 the sweep re-enters it and records that it ran.",
+      "contract": {
+        "inputs": [
+          "decided reviews"
+        ],
+        "outputs": [
+          "sweep schedule"
+        ],
+        "reads": [
+          "reviews",
+          "vendors",
+          "tasks"
+        ],
+        "writes": [
+          "tasks",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "approvals",
+          "email",
+          "vendor data write"
+        ],
+        "model": null
+      },
+      "failure": null
+    },
+    {
+      "id": "relevance_router",
+      "kind": "router",
+      "label": "Relevance router",
+      "identity": "sa-watchdog",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [
+        "watchdog.sweep"
+      ],
+      "emits": [
+        "watchdog.hit"
+      ],
+      "arrives_in": [
+        "monitored"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "decision:relevance_router",
+        "collection:tasks"
+      ],
+      "note": "A feed outage logs and skips. Monitoring never blocks an active review.",
+      "contract": {
+        "inputs": [
+          "feed signal",
+          "vendor identity"
+        ],
+        "outputs": [
+          "re-review",
+          "triage card",
+          "discard"
+        ],
+        "reads": [
+          "vendors",
+          "tasks",
+          "approved_vendors"
+        ],
+        "writes": [
+          "tasks",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "egress outside the allowlist",
+          "approvals",
+          "email"
+        ],
+        "model": "fast"
+      },
+      "failure": {
+        "max_attempts": 5,
+        "on_exhaustion": "skip",
+        "park_reason": "",
+        "degraded_to": null
+      }
+    },
+    {
+      "id": "rereview",
+      "kind": "event",
+      "label": "Open a linked re-review",
+      "identity": "sa-watchdog",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [],
+      "emits": [
+        "review.intake"
+      ],
+      "arrives_in": [
+        "decided",
+        "monitored"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "field:reopened_from"
+      ],
+      "note": "A new linked record. History is never mutated.",
+      "contract": {
+        "inputs": [
+          "high-confidence signal"
+        ],
+        "outputs": [
+          "review.intake"
+        ],
+        "reads": [
+          "reviews",
+          "vendors"
+        ],
+        "writes": [
+          "reviews",
+          "tasks",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "mutating the decided review"
+        ],
+        "model": null
+      },
+      "failure": null
+    },
+    {
+      "id": "needs_human",
+      "kind": "terminal",
+      "label": "Parked \u00b7 needs a person",
+      "identity": "any",
+      "checkpoint": null,
+      "plan_step": null,
+      "triggered_by": [],
+      "emits": [],
+      "arrives_in": [
+        "needs_human"
+      ],
+      "advances_to": null,
+      "observed_by": [
+        "state:needs_human",
+        "card:parked"
+      ],
+      "note": "Reachable from every node. A failure path that cannot be executed is worse than one never written down.",
+      "contract": {
+        "inputs": [
+          "a park reason"
+        ],
+        "outputs": [
+          "dashboard card"
+        ],
+        "reads": [
+          "reviews"
+        ],
+        "writes": [
+          "reviews",
+          "events",
+          "decisions",
+          "dashboard_events"
+        ],
+        "forbidden": [
+          "silent correction"
+        ],
+        "model": null
+      },
+      "failure": null
+    }
+  ],
+  "edges": [
+    {
+      "source": "intake",
+      "target": "recall",
+      "kind": "event",
+      "trigger": "review.intake",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "recall",
+      "target": "tier_router",
+      "kind": "inline",
+      "trigger": "",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "tier_router",
+      "target": "plan",
+      "kind": "branch",
+      "trigger": "",
+      "guard": "planner.tier_from",
+      "label": "tier 1/2/3"
+    },
+    {
+      "source": "plan",
+      "target": "contact_gate",
+      "kind": "event",
+      "trigger": "review.plan_ready",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "contact_gate",
+      "target": "questionnaire_send",
+      "kind": "event",
+      "trigger": "review.approved",
+      "guard": "gateway.verify_approval_token(scope=contact)",
+      "label": "G2 released"
+    },
+    {
+      "source": "questionnaire_send",
+      "target": "chase",
+      "kind": "event",
+      "trigger": "review.chase_due",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "chase",
+      "target": "chase",
+      "kind": "cycle",
+      "trigger": "review.chase_due",
+      "guard": "",
+      "label": "rounds 1\u20133"
+    },
+    {
+      "source": "questionnaire_send",
+      "target": "reply",
+      "kind": "event",
+      "trigger": "vendor.reply_received",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "reply",
+      "target": "reply_parse",
+      "kind": "event",
+      "trigger": "vendor.reply_received",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "reply_parse",
+      "target": "followup",
+      "kind": "inline",
+      "trigger": "",
+      "guard": "answer rated unusable",
+      "label": ""
+    },
+    {
+      "source": "followup",
+      "target": "reply",
+      "kind": "cycle",
+      "trigger": "vendor.reply_received",
+      "guard": "",
+      "label": "once each"
+    },
+    {
+      "source": "reply_parse",
+      "target": "retier_router",
+      "kind": "inline",
+      "trigger": "",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "retier_router",
+      "target": "questionnaire_send",
+      "kind": "cycle",
+      "trigger": "review.plan_ready",
+      "guard": "tier raised",
+      "label": "plan v+1"
+    },
+    {
+      "source": "retier_router",
+      "target": "coverage_join",
+      "kind": "branch",
+      "trigger": "",
+      "guard": "tier unchanged",
+      "label": ""
+    },
+    {
+      "source": "questionnaire_send",
+      "target": "upload",
+      "kind": "event",
+      "trigger": "vendor.evidence_uploaded",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "upload",
+      "target": "screening",
+      "kind": "event",
+      "trigger": "vendor.evidence_uploaded",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "screening",
+      "target": "index",
+      "kind": "event",
+      "trigger": "evidence.screened",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "screening",
+      "target": "extract",
+      "kind": "event",
+      "trigger": "evidence.screened",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "screening",
+      "target": "score",
+      "kind": "event",
+      "trigger": "review.rescore",
+      "guard": "",
+      "label": "adversarial conduct"
+    },
+    {
+      "source": "coverage_join",
+      "target": "extract",
+      "kind": "branch",
+      "trigger": "",
+      "guard": "coverage reached",
+      "label": "open evidence review"
+    },
+    {
+      "source": "coverage_join",
+      "target": "chase",
+      "kind": "branch",
+      "trigger": "",
+      "guard": "coverage short",
+      "label": "keep waiting"
+    },
+    {
+      "source": "extract",
+      "target": "checks",
+      "kind": "inline",
+      "trigger": "",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "index",
+      "target": "cross_exam",
+      "kind": "inline",
+      "trigger": "",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "extract",
+      "target": "cross_exam",
+      "kind": "inline",
+      "trigger": "",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "extract",
+      "target": "subprocessors",
+      "kind": "inline",
+      "trigger": "",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "checks",
+      "target": "findings_join",
+      "kind": "inline",
+      "trigger": "",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "cross_exam",
+      "target": "findings_join",
+      "kind": "inline",
+      "trigger": "",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "subprocessors",
+      "target": "findings_join",
+      "kind": "inline",
+      "trigger": "",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "findings_join",
+      "target": "score",
+      "kind": "event",
+      "trigger": "review.findings_ready",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "score",
+      "target": "memo",
+      "kind": "inline",
+      "trigger": "",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "memo",
+      "target": "decision_gate",
+      "kind": "event",
+      "trigger": "review.score_ready",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "decision_gate",
+      "target": "decide",
+      "kind": "event",
+      "trigger": "review.approved",
+      "guard": "gateway.verify_approval_token(scope=decision)",
+      "label": "G1 released"
+    },
+    {
+      "source": "decide",
+      "target": "monitor",
+      "kind": "inline",
+      "trigger": "",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "monitor",
+      "target": "relevance_router",
+      "kind": "event",
+      "trigger": "watchdog.sweep",
+      "guard": "",
+      "label": ""
+    },
+    {
+      "source": "relevance_router",
+      "target": "monitor",
+      "kind": "branch",
+      "trigger": "",
+      "guard": "no signal",
+      "label": "keep watching"
+    },
+    {
+      "source": "relevance_router",
+      "target": "needs_human",
+      "kind": "branch",
+      "trigger": "",
+      "guard": "confidence below threshold",
+      "label": "triage"
+    },
+    {
+      "source": "relevance_router",
+      "target": "rereview",
+      "kind": "branch",
+      "trigger": "",
+      "guard": "confidence >= threshold",
+      "label": ""
+    },
+    {
+      "source": "rereview",
+      "target": "intake",
+      "kind": "cycle",
+      "trigger": "review.intake",
+      "guard": "",
+      "label": "new linked review"
+    },
+    {
+      "source": "plan",
+      "target": "needs_human",
+      "kind": "failure",
+      "trigger": "",
+      "guard": "planning_failed",
+      "label": "park"
+    },
+    {
+      "source": "contact_gate",
+      "target": "needs_human",
+      "kind": "failure",
+      "trigger": "",
+      "guard": "contact_gate",
+      "label": "park"
+    },
+    {
+      "source": "questionnaire_send",
+      "target": "needs_human",
+      "kind": "failure",
+      "trigger": "",
+      "guard": "send_failed",
+      "label": "park"
+    },
+    {
+      "source": "reply_parse",
+      "target": "needs_human",
+      "kind": "failure",
+      "trigger": "",
+      "guard": "reply_unparseable",
+      "label": "park"
+    },
+    {
+      "source": "chase",
+      "target": "needs_human",
+      "kind": "failure",
+      "trigger": "",
+      "guard": "no_reply",
+      "label": "park"
+    },
+    {
+      "source": "screening",
+      "target": "needs_human",
+      "kind": "failure",
+      "trigger": "",
+      "guard": "screening_unavailable",
+      "label": "park"
+    },
+    {
+      "source": "cross_exam",
+      "target": "needs_human",
+      "kind": "failure",
+      "trigger": "",
+      "guard": "cross_exam_failed",
+      "label": "park"
+    },
+    {
+      "source": "findings_join",
+      "target": "needs_human",
+      "kind": "failure",
+      "trigger": "",
+      "guard": "evidence_incomplete",
+      "label": "park"
+    },
+    {
+      "source": "score",
+      "target": "needs_human",
+      "kind": "failure",
+      "trigger": "",
+      "guard": "scoring_failed",
+      "label": "park"
+    },
+    {
+      "source": "memo",
+      "target": "needs_human",
+      "kind": "failure",
+      "trigger": "",
+      "guard": "memo_failed",
+      "label": "park"
+    },
+    {
+      "source": "decision_gate",
+      "target": "needs_human",
+      "kind": "failure",
+      "trigger": "",
+      "guard": "gate_unresolved",
+      "label": "park"
+    },
+    {
+      "source": "decide",
+      "target": "needs_human",
+      "kind": "failure",
+      "trigger": "",
+      "guard": "decision_write_failed",
+      "label": "park"
+    }
+  ],
+  "routers": [
+    {
+      "id": "tier",
+      "node": "tier_router",
+      "monotonic": "scrutiny never falls",
+      "branches": [
+        {
+          "to": "plan",
+          "when": "customer data, production access or an AI service",
+          "decided_by": "planner.tier_from"
+        },
+        {
+          "to": "plan",
+          "when": "internal non-customer data",
+          "decided_by": "planner.tier_from"
+        },
+        {
+          "to": "plan",
+          "when": "everything else",
+          "decided_by": "planner.tier_from"
+        }
+      ]
+    },
+    {
+      "id": "retier",
+      "node": "retier_router",
+      "monotonic": "tier only ever rises",
+      "branches": [
+        {
+          "to": "questionnaire_send",
+          "when": "an answer widens the declared data scope",
+          "decided_by": "retier.reassess_tier"
+        },
+        {
+          "to": "coverage_join",
+          "when": "the declared scope still holds",
+          "decided_by": "retier.reassess_tier"
+        }
+      ]
+    },
+    {
+      "id": "relevance",
+      "node": "relevance_router",
+      "monotonic": "a signal is never un-seen",
+      "branches": [
+        {
+          "to": "rereview",
+          "when": "relevant and confidence >= 0.8",
+          "decided_by": "watchdog.relevance"
+        },
+        {
+          "to": "needs_human",
+          "when": "relevant and confidence below 0.8",
+          "decided_by": "watchdog.relevance"
+        },
+        {
+          "to": "monitor",
+          "when": "not relevant to this vendor",
+          "decided_by": "watchdog.relevance"
+        }
+      ]
+    }
+  ],
+  "joins": [
+    {
+      "id": "coverage",
+      "node": "coverage_join",
+      "mode": "threshold",
+      "threshold": 0.9,
+      "quorum": null,
+      "override": "an analyst marks the reply thread complete",
+      "on_shortfall": "wait",
+      "arms": [
+        {
+          "name": "reply_parse",
+          "required": true,
+          "describes": "answers merged and rated"
+        },
+        {
+          "name": "followup",
+          "required": false,
+          "describes": "unusable answers re-asked once"
+        },
+        {
+          "name": "chase",
+          "required": false,
+          "describes": "outstanding questions chased"
+        }
+      ]
+    },
+    {
+      "id": "findings",
+      "node": "findings_join",
+      "mode": "all_required",
+      "threshold": null,
+      "quorum": null,
+      "override": null,
+      "on_shortfall": "park",
+      "arms": [
+        {
+          "name": "checks",
+          "required": true,
+          "describes": "arithmetic over extracted dates"
+        },
+        {
+          "name": "cross_exam",
+          "required": true,
+          "describes": "claims reconciled against passages"
+        },
+        {
+          "name": "subprocessors",
+          "required": true,
+          "describes": "the fourth-party chain diffed"
+        }
+      ]
+    }
+  ],
+  "cycles": [
+    {
+      "id": "chase_rounds",
+      "through": [
+        "chase"
+      ],
+      "max_iterations": 3,
+      "counted_by": "reviews.chase_round",
+      "on_exhaustion": "park at needs_human; a person owns the correspondence",
+      "bounded_by": "an explicit round counter"
+    },
+    {
+      "id": "followup_once",
+      "through": [
+        "reply_parse",
+        "followup"
+      ],
+      "max_iterations": 1,
+      "counted_by": "followups.asked",
+      "on_exhaustion": "accept the answer as given and let it show as a gap",
+      "bounded_by": "one re-ask per answer"
+    },
+    {
+      "id": "retier",
+      "through": [
+        "reply_parse",
+        "retier_router",
+        "questionnaire_send"
+      ],
+      "max_iterations": 2,
+      "counted_by": "reviews.plan_version",
+      "on_exhaustion": "tier 1 is the ceiling; there is nothing further to raise to",
+      "bounded_by": "arithmetic \u2014 three tiers and the tier only ever rises"
+    },
+    {
+      "id": "rereview",
+      "through": [
+        "monitor",
+        "relevance_router",
+        "rereview",
+        "intake"
+      ],
+      "max_iterations": 3,
+      "counted_by": "reviews.reopened_from chain depth",
+      "on_exhaustion": "raise a triage card and open nothing; a person decides whether a fourth automated re-review is the right answer",
+      "bounded_by": "a declared budget \u2014 the feed provides no natural one"
+    }
+  ]
+}

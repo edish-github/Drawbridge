@@ -1,27 +1,32 @@
+/**
+ * The console frame: a fixed shell with a scrolling interior.
+ *
+ * The whole application lives inside one rounded card on a warm ground, and the interior is the
+ * only thing that scrolls. That is not decoration — an operator working a queue moves between
+ * eleven screens in a session, and a shell that stays put means the navigation never reflows
+ * under the cursor and the page they were reading is the only thing that moved.
+ */
+
 import type { Metadata } from "next";
-import Link from "next/link";
+import Nav from "./nav";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Drawbridge",
-  description: "The fleet that decides what crosses into the castle.",
+  title: "Drawbridge — vendor security review fleet",
+  description:
+    "Read-only operator console over the review ledger. Every number on screen was computed by the fleet.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <header className="topbar">
-          <div className="topbar-inner">
-            <Link href="/" className="wordmark">
-              Drawbridge
-            </Link>
-            <span className="tagline">
-              Vendor security review fleet · read-only operator view
-            </span>
+        <div className="frame">
+          <div className="console">
+            <Nav />
+            <main className="main">{children}</main>
           </div>
-        </header>
-        {children}
+        </div>
       </body>
     </html>
   );

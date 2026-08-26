@@ -1,0 +1,492 @@
+{
+  "scoring": {
+    "scale_max": 100,
+    "domains": {
+      "data_protection": 20,
+      "access_control": 15,
+      "incident_response": 15,
+      "compliance_posture": 15,
+      "subprocessors": 15,
+      "business_continuity": 10,
+      "ai_specific": 10
+    },
+    "penalties": {
+      "low": 2,
+      "medium": 5,
+      "high": 10
+    },
+    "bands": {
+      "approve": 80,
+      "conditional": 60,
+      "escalate": 0
+    },
+    "tier_profiles": {
+      "1": [
+        "data_protection",
+        "access_control",
+        "incident_response",
+        "compliance_posture",
+        "subprocessors",
+        "business_continuity",
+        "ai_specific"
+      ],
+      "2": [
+        "data_protection",
+        "access_control",
+        "incident_response",
+        "compliance_posture",
+        "subprocessors",
+        "business_continuity"
+      ],
+      "3": [
+        "data_protection",
+        "access_control",
+        "compliance_posture"
+      ]
+    },
+    "modifiers": {
+      "adversarial_conduct": {
+        "penalty": 25,
+        "forces_band": "escalate"
+      }
+    },
+    "contradiction_multiplier": null
+  },
+  "questionnaire": {
+    "coverage_to_proceed": 0.9,
+    "questions_by_domain": {
+      "data_protection": 12,
+      "access_control": 9,
+      "incident_response": 9,
+      "compliance_posture": 9,
+      "subprocessors": 9,
+      "business_continuity": 6,
+      "ai_specific": 6
+    },
+    "total_questions": 60
+  },
+  "gateway": {
+    "policies": [
+      {
+        "id": "P1",
+        "name": "No outbound contact without a human approval",
+        "detail": "No outbound email to a new contact without a valid, single-use, scoped approval token. Verification only: this process holds the public key and has no signing capability at any point in its life."
+      },
+      {
+        "id": "P2",
+        "name": "No external content reaches a model unscreened",
+        "detail": "Enforced in shared/routing.py rather than at the tool gateway, because the router is the only path to a model. Verdict-aware: sanitised content is admissible to the Evidence agent and inadmissible to the memo."
+      },
+      {
+        "id": "P3",
+        "name": "Outbound fetch is bounded by an allowlist",
+        "detail": "Four hosts, named individually rather than by wildcard. An agent with unbounded egress is an exfiltration channel and an SSRF surface."
+      }
+    ],
+    "feed_allowlist": [
+      "krebsonsecurity.com",
+      "services.nvd.nist.gov",
+      "www.bleepingcomputer.com",
+      "www.cisa.gov"
+    ],
+    "model_input_tools": [
+      "classify_data_scope",
+      "cross_examine",
+      "extract_controls",
+      "parse_reply",
+      "risk_memo"
+    ],
+    "deep_model_tools": [
+      "risk_memo"
+    ]
+  },
+  "screening": {
+    "critical_filters": [
+      "malicious_uris",
+      "pi_and_jailbreak",
+      "sdp"
+    ],
+    "untrusted_templates": [
+      "local-seed",
+      "local-stub"
+    ],
+    "execution_success": "EXECUTION_SUCCESS",
+    "match_found": "MATCH_FOUND"
+  },
+  "identities": [
+    {
+      "name": "sa-orchestrator",
+      "display": "Drawbridge orchestrator",
+      "purpose": "Owns review state and the plan.",
+      "reads": [
+        "dashboard_events",
+        "data_scope_classifications",
+        "dossiers",
+        "findings",
+        "idempotency",
+        "memos",
+        "qa_responses",
+        "reviews",
+        "scores",
+        "screenings",
+        "vendors"
+      ],
+      "writes": [
+        "dashboard_events",
+        "data_scope_classifications",
+        "decisions",
+        "events",
+        "idempotency",
+        "reviews"
+      ],
+      "never": [
+        "email",
+        "any Storage role",
+        "approvals write"
+      ],
+      "vertex_ai": true,
+      "secrets": []
+    },
+    {
+      "name": "sa-questionnaire",
+      "display": "Drawbridge questionnaire",
+      "purpose": "Talks to the vendor. Holds nothing that can change the number.",
+      "reads": [
+        "approval_tokens_spent",
+        "approvals",
+        "dashboard_events",
+        "followups",
+        "idempotency",
+        "inbox",
+        "qa_responses",
+        "qa_responses_superseded",
+        "reviews",
+        "vendors"
+      ],
+      "writes": [
+        "approval_tokens_spent",
+        "dashboard_events",
+        "decisions",
+        "events",
+        "followups",
+        "idempotency",
+        "inbox",
+        "qa_responses",
+        "qa_responses_superseded",
+        "reviews"
+      ],
+      "never": [
+        "findings write",
+        "scores write",
+        "approvals write",
+        "any Storage read"
+      ],
+      "vertex_ai": true,
+      "secrets": []
+    },
+    {
+      "name": "sa-evidence",
+      "display": "Drawbridge evidence",
+      "purpose": "Reads the most hostile content in the system and holds nothing to actuate it with.",
+      "reads": [
+        "approved_vendors",
+        "dashboard_events",
+        "evidence_chunks",
+        "findings",
+        "idempotency",
+        "qa_responses",
+        "reviews",
+        "subprocessors",
+        "vendors"
+      ],
+      "writes": [
+        "dashboard_events",
+        "decisions",
+        "events",
+        "evidence_chunks",
+        "findings",
+        "idempotency",
+        "subprocessors"
+      ],
+      "never": [
+        "any egress",
+        "email",
+        "the quarantine bucket"
+      ],
+      "vertex_ai": true,
+      "secrets": []
+    },
+    {
+      "name": "sa-scorer",
+      "display": "Drawbridge scorer",
+      "purpose": "Computes the Trust Score in code and writes one memo.",
+      "reads": [
+        "dashboard_events",
+        "dossiers",
+        "findings",
+        "idempotency",
+        "memos",
+        "reviews",
+        "scores",
+        "screenings",
+        "vendors"
+      ],
+      "writes": [
+        "dashboard_events",
+        "decisions",
+        "dossiers",
+        "events",
+        "findings",
+        "idempotency",
+        "memos",
+        "scores"
+      ],
+      "never": [
+        "external calls",
+        "approvals write"
+      ],
+      "vertex_ai": true,
+      "secrets": []
+    },
+    {
+      "name": "sa-watchdog",
+      "display": "Drawbridge watchdog",
+      "purpose": "Post-approval monitoring. Fetches only from the feed allowlist.",
+      "reads": [
+        "approved_vendors",
+        "dashboard_events",
+        "idempotency",
+        "reviews",
+        "scores",
+        "tasks",
+        "vendors"
+      ],
+      "writes": [
+        "dashboard_events",
+        "decisions",
+        "events",
+        "idempotency",
+        "reviews",
+        "tasks"
+      ],
+      "never": [
+        "approvals",
+        "email",
+        "vendor data write",
+        "mutating a decided review"
+      ],
+      "vertex_ai": true,
+      "secrets": []
+    },
+    {
+      "name": "sa-armor",
+      "display": "Drawbridge screening pipeline",
+      "purpose": "A real identity, not a convenience. The screening pipeline is a platform-owned stage, so it runs as itself rather than as a developer credential \u2014 which is what makes \"no agent has a code path into quarantine\" true rather than aspirational. It handles the rawest, most hostile bytes in the system and is the one component structurally incapable of prompting anything.",
+      "reads": [
+        "inert_excerpts",
+        "reviews",
+        "screenings"
+      ],
+      "writes": [
+        "events",
+        "inert_excerpts",
+        "screenings"
+      ],
+      "never": [
+        "any generative model call",
+        "email",
+        "findings write"
+      ],
+      "vertex_ai": false,
+      "secrets": []
+    },
+    {
+      "name": "sa-portal",
+      "display": "Drawbridge vendor portal",
+      "purpose": "Token-scoped vendor-facing surface.",
+      "reads": [
+        "qa_responses",
+        "reviews"
+      ],
+      "writes": [
+        "events",
+        "qa_responses"
+      ],
+      "never": [
+        "quarantine read",
+        "findings write",
+        "scores write",
+        "approvals write"
+      ],
+      "vertex_ai": false,
+      "secrets": []
+    },
+    {
+      "name": "sa-dashboard",
+      "display": "Drawbridge dashboard",
+      "purpose": "Internal review queue, timeline and gate cards.",
+      "reads": [
+        "approvals",
+        "dashboard_events",
+        "decisions",
+        "events",
+        "findings",
+        "followups",
+        "inbox",
+        "memos",
+        "reviews",
+        "scores",
+        "screenings",
+        "tasks",
+        "vendors"
+      ],
+      "writes": [
+        "events"
+      ],
+      "never": [
+        "approvals write",
+        "any generative model call on a public route"
+      ],
+      "vertex_ai": false,
+      "secrets": []
+    },
+    {
+      "name": "sa-approvals",
+      "display": "Drawbridge approval service",
+      "purpose": "The only identity in the project that holds the private approval signing key. The gateway holds the public half and nothing else, so the gateway can recognise a human decision but is structurally incapable of manufacturing one.",
+      "reads": [
+        "approvals",
+        "findings",
+        "reviews",
+        "scores"
+      ],
+      "writes": [
+        "approvals",
+        "events"
+      ],
+      "never": [
+        "findings write",
+        "scores write"
+      ],
+      "vertex_ai": false,
+      "secrets": [
+        "drawbridge-approval-key"
+      ]
+    },
+    {
+      "name": "sa-binder",
+      "display": "Drawbridge binder service",
+      "purpose": "Renders the audit binder from a template, never from a model.",
+      "reads": [
+        "approvals",
+        "dashboard_events",
+        "data_scope_classifications",
+        "decisions",
+        "events",
+        "evidence_chunks",
+        "findings",
+        "followups",
+        "inert_excerpts",
+        "memos",
+        "qa_responses",
+        "qa_responses_superseded",
+        "reviews",
+        "scores",
+        "screenings",
+        "subprocessors",
+        "tasks",
+        "vendors"
+      ],
+      "writes": [],
+      "never": [
+        "any generative model call",
+        "any write to the ledger"
+      ],
+      "vertex_ai": false,
+      "secrets": []
+    }
+  ],
+  "events": {
+    "topics": [
+      "review.intake",
+      "review.plan_ready",
+      "vendor.reply_received",
+      "review.chase_due",
+      "vendor.evidence_uploaded",
+      "evidence.screened",
+      "review.findings_ready",
+      "review.score_ready",
+      "review.approved",
+      "review.rescore",
+      "watchdog.sweep",
+      "watchdog.hit"
+    ],
+    "max_delivery_attempts": 5,
+    "ack_deadline_seconds": 60,
+    "out_of_phase": [
+      {
+        "event": "vendor.reply_received",
+        "condition": "review already SCORED",
+        "behaviour": "attach to the ledger as an addendum; if it changes an answer that produced a finding, publish review.rescore. Never silently discarded \u2014 the discarded reply is the one the vendor will quote back."
+      },
+      {
+        "event": "evidence.screened",
+        "condition": "no plan exists yet",
+        "behaviour": "park the message and retry with backoff; dead-letter after five attempts"
+      },
+      {
+        "event": "watchdog.hit",
+        "condition": "review already reopened",
+        "behaviour": "deduplicate on signal id"
+      },
+      {
+        "event": "any",
+        "condition": "review is DECIDED",
+        "behaviour": "append to the ledger, never mutate. A decided review is immutable; a new signal opens a new linked review rather than editing a closed one."
+      }
+    ]
+  },
+  "graph": {
+    "nodes": 28,
+    "edges": 50,
+    "routers": 3,
+    "joins": 2,
+    "cycles": 4,
+    "step_vocabulary": [
+      "questionnaire_send",
+      "chase",
+      "followup",
+      "evidence_extract",
+      "cross_examine",
+      "subprocessor_extract",
+      "score",
+      "memo",
+      "gate_decision"
+    ]
+  },
+  "collections": [
+    "approval_tokens_spent",
+    "approvals",
+    "approved_vendors",
+    "dashboard_events",
+    "data_scope_classifications",
+    "decisions",
+    "dossiers",
+    "events",
+    "evidence_chunks",
+    "findings",
+    "followups",
+    "idempotency",
+    "inbox",
+    "inert_excerpts",
+    "memos",
+    "qa_responses",
+    "qa_responses_superseded",
+    "reviews",
+    "scores",
+    "screenings",
+    "subprocessors",
+    "tasks",
+    "vendors"
+  ]
+}
