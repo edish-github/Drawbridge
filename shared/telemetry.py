@@ -157,7 +157,7 @@ def set_content_refs(s, *, ref: str, sha256: str, verdict: str) -> None:
 COLLECTION_DECISIONS = "decisions"
 
 
-def record_decision(s, *, goal: str, decision: str, ctx=None) -> None:
+def record_decision(s, *, goal: str, decision: str, ctx=None, node: str | None = None) -> None:
     """Record what this step was trying to do and what it concluded, in plain English.
 
     Both strings are authored by the fleet, never quoted from vendor-supplied content. These
@@ -171,11 +171,24 @@ def record_decision(s, *, goal: str, decision: str, ctx=None) -> None:
     The trace is for watching the fleet; the ledger is for reconstructing a decision six months
     later, and those are different jobs.
 
+    ``node`` stamps the record with the id of the graph node this decision belongs to, from
+    ``shared.graph``. It is what lets ``shared.graph_run`` project a review's path exactly
+    rather than inferring it from the wording of a goal string — and it is passed at the call
+    site rather than derived from the context because one handler legitimately spans several
+    nodes, and a context-derived stamp would attribute all of them to whichever one the handler
+    is named after.
+
+    An unstamped decision is not an error: the projection has other observations for every node,
+    and records written before the field existed still project. The stamp makes the answer exact
+    where it is present.
+
     Never raises. A decision that could not be persisted is a thinner binder section, not a
     failed review.
     """
     s.set_attribute("goal", goal)
     s.set_attribute("decision", decision)
+    if node:
+        s.set_attribute("node", node)
 
     review_id = getattr(ctx, "review_id", None)
     if not review_id:
@@ -192,6 +205,7 @@ def record_decision(s, *, goal: str, decision: str, ctx=None) -> None:
                 "agent": getattr(ctx, "agent", "") or "",
                 "goal": goal,
                 "decision": decision,
+                "node": node or "",
                 "trace_id": getattr(ctx, "trace_id", "") or "",
                 "idem_key": getattr(ctx, "idem_key", None),
                 "at": datetime.now(UTC).isoformat(),

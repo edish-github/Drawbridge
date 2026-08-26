@@ -21,6 +21,15 @@ Acknowledgement rule, and it is the whole failure story:
   produces four more identical failures and a dead letter, and the parse will not start working.
 - anything else — nack, so a transient dependency failure is retried rather than swallowed.
 
+**Exhaustion is a failure edge and it is now executed rather than described.** Pub/Sub moves a
+message to its dead-letter topic after ``MAX_DELIVERY_ATTEMPTS``, and until this loop read the
+delivery count nothing moved the *review*: the message left the subscription and the review sat
+in whatever state it had, in flight forever, with no card. The architecture said "a message
+reaching its dead-letter topic moves its review to ``NEEDS_HUMAN`` and surfaces on the
+dashboard", and ``tests/test_late_events.py`` asserted it behind a skip. The park now happens on
+the last delivery, before the message is dead-lettered, because a consumer that has already lost
+the message cannot act on it — the last attempt is the last chance to say what stalled.
+
 The runner subscribes only to topics with a registered handler. An unhandled topic is left
 unconsumed on purpose: its messages accumulate on a subscription where they can be seen, rather
 than being pulled and dropped by a loop that had nowhere to send them.
@@ -46,6 +55,7 @@ from shared.domain import Review
 from shared.events import (
     ALL_TOPICS,
     EXPECTED_STATES,
+    MAX_DELIVERY_ATTEMPTS,
     TOPIC_EVIDENCE_SCREENED,
     TOPIC_REVIEW_APPROVED,
     TOPIC_REVIEW_CHASE_DUE,
@@ -62,6 +72,7 @@ from shared.events import (
     guard,
     subscription_name,
 )
+from shared.state import park
 from shared.telemetry import init_tracing, span
 
 log = logging.getLogger("drawbridge.subscriber")
@@ -237,14 +248,47 @@ class Runner:
 
             except MessageParked as exc:
                 log.info("parked: %s", exc)
+                self._exhausted(message, event, topic, str(exc))
                 self._nack(client, subscription, ack_id)
                 return
             except Exception as exc:  # noqa: BLE001 — the loop survives one bad message
                 log.exception("handler for %s failed on review=%s: %s", topic, event.review_id, exc)
+                self._exhausted(message, event, topic, repr(exc))
                 self._nack(client, subscription, ack_id)
                 return
 
         client.acknowledge(request={"subscription": subscription, "ack_ids": [ack_id]})
+
+    @staticmethod
+    def _exhausted(message, event: EventEnvelope, topic: str, detail: str) -> None:
+        """Park the review when this delivery was the last one before the dead-letter topic.
+
+        ``delivery_attempt`` is populated by Pub/Sub only on a subscription that has a
+        dead-letter policy, and is absent on the emulator's plain subscriptions. Absent is read
+        as "not the last attempt": parking on every failure would turn one transient dependency
+        blip into a parked review, which is the opposite of the redelivery this loop exists to
+        allow.
+
+        Never raises. A park that fails must not also swallow the nack — the message still has
+        to go back for its remaining deliveries, and a review that could not be parked is better
+        served by a redelivery than by a crashed worker.
+        """
+        attempt = getattr(message, "delivery_attempt", 0) or 0
+        if attempt < MAX_DELIVERY_ATTEMPTS:
+            return
+        try:
+            park(
+                event.review_id,
+                reason=f"dlq:{topic} after {attempt} attempts — {detail[:120]}",
+            )
+            log.error(
+                "review=%s parked: %s exhausted %d deliveries and is dead-lettering",
+                event.review_id,
+                topic,
+                attempt,
+            )
+        except Exception as exc:  # noqa: BLE001 — see the docstring
+            log.error("could not park %s on dead-letter exhaustion: %s", event.review_id, exc)
 
     @staticmethod
     def _nack(client, subscription: str, ack_id: str) -> None:
